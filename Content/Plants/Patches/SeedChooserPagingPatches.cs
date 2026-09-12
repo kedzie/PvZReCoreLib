@@ -326,6 +326,11 @@ public class SeedChooserPagingButtonsMarker : ClassExtension<SeedChooserScreen>
 {
     public bool IsPatched;
     public int Attempts;
+
+    // Separate, much smaller budget for the "AlmanacArchive+arrows were found fine, but the
+    // P_SeedChooser scene search keeps failing" failure mode specifically - see its own comment
+    // at the check site for why this needed splitting out from Attempts/MaxAttempts.
+    public int PanelSearchFailures;
 }
 
 [HarmonyPatch(typeof(SeedChooserScreen), nameof(SeedChooserScreen.Update))]
@@ -371,6 +376,17 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
     // third name.
     private static readonly string[] SeedChooserStateNames = { "SeedChooser", "ChooseSeeds" };
 
+    // DIAGNOSTIC (temporary): a versus-mode player reported the seed chooser feeling laggy,
+    // something never actually tested there before. Leading suspect is this exact method - while
+    // unpatched it runs Resources.FindObjectsOfTypeAll<AlmanacArchive>() (a real scene-wide scan)
+    // on every single Update() call, and it can only ever succeed once an AlmanacArchive has been
+    // instantiated somewhere THIS SESSION. Every adventure-mode test so far happened to already
+    // have the Almanac loaded, so this always succeeded on attempt 1 - a versus-only player who
+    // never opens the Almanac first would instead pay that scan's real cost every frame for up to
+    // MaxAttempts (1200) frames before giving up. These logs are meant to confirm or rule that out
+    // directly - remove once the real cause is confirmed.
+    private static float firstAttemptRealtime = -1f;
+
     public static void Postfix(SeedChooserScreen __instance)
     {
         var patchMarker = SeedChooserPagingButtonsMarker.GetOrCreateExtension<SeedChooserPagingButtonsMarker>(__instance);
@@ -398,27 +414,52 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
             return;
         }
 
+        if (patchMarker.Attempts == 0)
+        {
+            firstAttemptRealtime = Time.realtimeSinceStartup;
+            MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] First paging-button attempt this screen-open. TreeState='{activeState.name}'.");
+        }
+
         patchMarker.Attempts++;
         if (patchMarker.Attempts > MaxAttempts)
         {
-            MelonLoader.MelonLogger.Warning("[CoreLib] Gave up looking for the seed chooser grid / an AlmanacArchive instance after " + MaxAttempts + " attempts while on the seed chooser screen - paging buttons will not be added this session.");
+            MelonLoader.MelonLogger.Warning($"[CoreLib] Gave up looking for the seed chooser grid / an AlmanacArchive instance after {MaxAttempts} attempts ({Time.realtimeSinceStartup - firstAttemptRealtime:F1}s of real time) while on the seed chooser screen - paging buttons will not be added this session.");
             patchMarker.IsPatched = true;
             return;
         }
 
+        var almanacSearchSw = System.Diagnostics.Stopwatch.StartNew();
         AlmanacArchive archiveTemplate = null;
         foreach (var candidate in Resources.FindObjectsOfTypeAll<AlmanacArchive>())
         {
             archiveTemplate = candidate;
             break;
         }
+        almanacSearchSw.Stop();
 
         if (archiveTemplate == null)
         {
+            // Logged every ~30 attempts (roughly twice a second at 60fps) rather than every
+            // single frame, to avoid flooding the log while still giving enough time resolution
+            // to see how long this repeats for.
+            if (patchMarker.Attempts % 30 == 0 || patchMarker.Attempts <= 3)
+            {
+                MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] Attempt {patchMarker.Attempts}/{MaxAttempts}: no AlmanacArchive instance found yet (this scan took {almanacSearchSw.Elapsed.TotalMilliseconds:F2}ms, {Time.realtimeSinceStartup - firstAttemptRealtime:F1}s elapsed since first attempt).");
+            }
+
             // The Almanac screen's prefab may genuinely not be loaded yet this session (e.g.
             // player hasn't opened it) - keep retrying (bounded) rather than giving up on the
             // first miss.
             return;
+        }
+
+        if (patchMarker.Attempts == 1 || patchMarker.PanelSearchFailures % 30 == 0)
+        {
+            // Throttled the same way the "not found" branch above is - this fires every attempt
+            // while the seed chooser's own UI is still mid-build (normal, brief, in the working
+            // case) or every attempt for up to 60 frames in the versus-mode incompatible case
+            // below, so logging it unconditionally would be noisy for both.
+            MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] AlmanacArchive found on attempt {patchMarker.Attempts} ({Time.realtimeSinceStartup - firstAttemptRealtime:F1}s since first attempt, this scan took {almanacSearchSw.Elapsed.TotalMilliseconds:F2}ms).");
         }
 
         GameObject arrowsSource = null;
@@ -495,7 +536,35 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
 
         if (seedChooserPanel == null)
         {
-            // Keep retrying (bounded) - the seed chooser's own UI may not have opened/built yet.
+            // Confirmed live (versus mode): archiveTemplate and arrowsSource are found
+            // instantly and reliably every single frame, but this scene-wide "P_SeedChooser"
+            // search NEVER succeeds - versus mode's "Choose Your Plants!"/"Pick Ur Zombeez"
+            // screen is an entirely different Widget/hierarchy from the adventure/co-op seed
+            // chooser this whole method was written against (confirmed via screenshot: 5 rows
+            // of 8, no Almanac/Shop buttons at all). Riding the outer Attempts/MaxAttempts=1200
+            // budget for this specific failure meant retrying the full expensive scene-root
+            // recursive search on EVERY frame for 42.8 real seconds before giving up - exactly
+            // the "totally unresponsive" versus-mode freeze that got reported. Once
+            // archiveTemplate/arrowsSource both already succeeded, the ONLY legitimate reason
+            // left to keep retrying is "the seed chooser's own UI hasn't finished building yet"
+            // - which resolves within the first handful of frames in every case that's ever
+            // actually worked. A much smaller dedicated cap here means an incompatible screen
+            // like versus's gives up in ~1 second instead of ~43.
+            patchMarker.PanelSearchFailures++;
+            const int maxPanelSearchFailures = 60;
+            if (patchMarker.PanelSearchFailures < maxPanelSearchFailures)
+            {
+                return;
+            }
+
+            var rootNames = new List<string>();
+            foreach (var root in activeScene.GetRootGameObjects())
+            {
+                rootNames.Add(root.name);
+            }
+
+            MelonLoader.MelonLogger.Warning($"[CoreLib] Gave up looking for a 'P_SeedChooser' hierarchy after {maxPanelSearchFailures} frames ({Time.realtimeSinceStartup - firstAttemptRealtime:F1}s since first attempt) - this screen's seed chooser is likely a different layout entirely (e.g. versus mode). Paging buttons will not be added this session. Scene root objects: " + string.Join(", ", rootNames));
+            patchMarker.IsPatched = true;
             return;
         }
 

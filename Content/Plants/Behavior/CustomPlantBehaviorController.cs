@@ -219,6 +219,72 @@ public class CustomPlantBehaviorController : CustomBehaviorController
         }
     }
 
+    // Caution: unconfirmed whether this actually changes what's rendered in
+    // this codebase. Whatever visually plays back a requested animation
+    // doesn't appear to be Unity's own autonomous Animator clock (see
+    // IsCustomAnimationFinished's comment for the evidence) - Animator.speed
+    // may therefore do nothing visible even though it's a real Unity API.
+    // Also note it's a property of the whole Animator component, not the
+    // individual state, so if it does anything it stays changed for
+    // whatever this plant plays next too.
+    public void PlayAnimation(string animation, float speedMultiplier)
+    {
+        PlayAnimation(animation);
+
+        var animator = Plant.mController.gameObject.GetComponentInChildren<Animator>();
+        if (animator != null)
+        {
+            animator.speed = speedMultiplier;
+        }
+    }
+
+    // Caution, confirmed in-game (Tumbleweed): despite Unity genuinely
+    // adding a real Animator to every custom plant's "anim" child
+    // (PvZRipImporter), this method's normalizedTime-based completion check
+    // does NOT reliably track what's actually rendered - a correctly-fast
+    // visual playback finished, then this kept reporting "not finished" for
+    // another 3-4 seconds. Whatever actually drives visible playback for a
+    // PlayAnimation(...) call isn't Unity's own autonomous Animator clock, or
+    // isn't reliably kept in sync with it. AnimationController.IsAnimationPlaying
+    // (Spine-shaped, but apparently tracking the same clock that's actually
+    // rendering) turned out to be the right completion signal instead - see
+    // Tumbleweed's own comment for the fuller story. IsCustomAnimationActive
+    // below is still fine to use (confirms *entry* into a state correctly),
+    // this method specifically is the one now under suspicion for exit/
+    // completion timing - don't reach for it without re-verifying in-game.
+    //
+    // "Not currently in this state" is ambiguous between "hasn't transitioned
+    // in yet" and "already finished and moved on" - confirmed in practice as
+    // a real bug: on some instances the transition into a just-requested
+    // state doesn't land within the same tick PlayAnimation was called, so a
+    // caller that starts polling IsCustomAnimationFinished immediately can
+    // read "hasn't started" as "already finished" and fire early (no visible
+    // animation, near-instant). Callers with a PlayAnimation-then-wait
+    // sequence should gate on IsCustomAnimationActive(stateName) first, and
+    // only start calling IsCustomAnimationFinished once that's confirmed true.
+    public bool IsCustomAnimationActive(string stateName)
+    {
+        var animator = Plant.mController.gameObject.GetComponentInChildren<Animator>();
+        return animator != null && animator.GetCurrentAnimatorStateInfo(0).IsName(stateName);
+    }
+
+    public bool IsCustomAnimationFinished(string stateName)
+    {
+        var animator = Plant.mController.gameObject.GetComponentInChildren<Animator>();
+        if (animator == null)
+        {
+            return true;
+        }
+
+        var stateInfo = animator.GetCurrentAnimatorStateInfo(0);
+        if (stateInfo.IsName(stateName))
+        {
+            return stateInfo.normalizedTime >= 1f && !animator.IsInTransition(0);
+        }
+
+        return !animator.IsInTransition(0);
+    }
+
     #endregion
 }
 

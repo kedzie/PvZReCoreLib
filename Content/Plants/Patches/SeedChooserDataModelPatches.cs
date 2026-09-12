@@ -261,10 +261,25 @@ public class SeedChooserDataModel_CustomPlantEntriesPatch
 [HarmonyPatch(typeof(SeedChooserDataModel), "UpdateEntries")]
 public class SeedChooserDataModel_UpdateEntries_AlwaysCleanRebuildPatch
 {
+    // DIAGNOSTIC (temporary): a versus-mode player reported the seed chooser feeling laggy, never
+    // actually tested there before. This method's own comment already documents ONE confirmed
+    // real-world case of a stray extra native UpdateEntries() call doubling every entry (48->104)
+    // with an ~8 second stall, from cycling the Imitater dialog - the trigger was never identified.
+    // Versus mode's two-player setup is a plausible new source of extra calls we've never seen.
+    // Logging every call's timing and a running count so a laggy versus session can be checked
+    // against "did UpdateEntries() get called more than once, and how long did each take" - remove
+    // once the real cause is confirmed.
+    private static int callCount = 0;
+    private static System.Diagnostics.Stopwatch sw;
+
     // ClearNoDispose, not Clear(): Clear() disposes each contained model, which may cancel an
     // in-flight async thumbnail load for a plant that hadn't finished loading yet.
     static void Prefix(SeedChooserDataModel __instance)
     {
+        callCount++;
+        sw = System.Diagnostics.Stopwatch.StartNew();
+        MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] Native UpdateEntries() call #{callCount} starting (entriesModel had {__instance.m_entriesModel.m_models.Count}, unlockedModel had {__instance.m_entriesUnlockedModel.m_models.Count} before clearing).");
+
         __instance.m_entriesModel.ClearNoDispose();
         __instance.m_entriesUnlockedModel.ClearNoDispose();
         SeedChooserDataModel_CustomPlantEntriesPatch.ResetPagingCaches();
@@ -276,6 +291,9 @@ public class SeedChooserDataModel_UpdateEntries_AlwaysCleanRebuildPatch
     // regardless of whatever page was actually selected.
     static void Postfix(SeedChooserDataModel __instance)
     {
+        sw?.Stop();
+        MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] Native UpdateEntries() call #{callCount} finished in {sw?.Elapsed.TotalMilliseconds:F2}ms (entriesModel now has {__instance.m_entriesModel.m_models.Count}, unlockedModel now has {__instance.m_entriesUnlockedModel.m_models.Count}).");
+
         var screen = __instance.m_seedChooserScreen;
         if (screen == null)
         {
