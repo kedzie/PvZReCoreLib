@@ -49,8 +49,9 @@ public class CoreLibMod : MelonMod
     public override void OnUpdate()
     {
         base.OnUpdate();
-        
+
         DebugConsole.Update();
+        SeedChooserPaging.TickDeferredRewire();
     }
 
     public void FirstTimeInit()

@@ -311,3 +311,4 @@ public class SeedChooserDataModel_UpdateEntries_AlwaysCleanRebuildPatch
         SeedChooserPaging.RewireVisibleGridNavigation();
     }
 }
+

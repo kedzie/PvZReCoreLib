@@ -50,10 +50,74 @@ public static class SeedChooserPaging
     // this fixed at 48 and only ~8 custom plants registered right now, everything currently fits
     // on a single custom page - multi-page custom navigation only actually matters once the
     // custom roster exceeds 48 (there's a stated intent to eventually port ~180 plants).
-    private const int PageSize = 48;
+    private const int AdventurePageSize = 48;
+
+    // Versus mode's own chooser is a genuinely smaller, fixed 5-row x 8-column = 40 slot grid
+    // (VersusMode.k_numRows = 5, confirmed via screenshot). Other special-level variants (e.g. a
+    // secret level's own seed chooser) default to AdventurePageSize until proven otherwise -
+    // no worse than the total absence of paging they had before this fix.
+    private const int VersusPageSize = 40;
+
+    // Set by SeedChooserScreen_InjectPagingButtons_Patch once it identifies which wrapper the
+    // found panel actually belongs to (by name, "Vs"/"Versus" appearing in it) - selects which
+    // fixed page size above applies.
+    public static bool IsVersusScreen { get; set; }
+
+    private static int PageSize => IsVersusScreen ? VersusPageSize : AdventurePageSize;
 
     private static int currentPage = 0;
     private static int lastPageCount = 1;
+
+    // CONFIRMED live (via NavDiag) that a fixed short frame delay is not enough: 5 frames after
+    // paging onto the 9-cell custom page, all 9 incoming cells still showed 0 populated icons (raw
+    // dump identified every one of them only by its template GameObject name, "SPR_SelectedItem",
+    // meaning the reactive binder that assigns each cell's real icon Image sprite hadn't run on any
+    // of them yet). Whatever async delay that binder actually has isn't a small, fixed number of
+    // frames - polling every frame until the active/populated cell count is non-zero AND stable
+    // (same reading twice in a row) is the only way to know it's actually safe to compute links,
+    // without hardcoding a guess that could just as easily be wrong again on a slower machine.
+    private static bool pendingRewirePolling = false;
+    private static int pendingRewirePollTicksLeft = 0;
+    private static int pendingRewireLastCount = -1;
+
+    // ~3 seconds at 60fps - generous relative to how long Imitater's dialog open/close (which
+    // reliably masks this bug) takes a real player to do, since that's the only known lower bound
+    // on how long this async populate can actually take.
+    private const int PendingRewireTimeoutTicks = 60;
+
+    private static void BeginPendingRewirePoll()
+    {
+        pendingRewirePolling = true;
+        pendingRewirePollTicksLeft = PendingRewireTimeoutTicks;
+        pendingRewireLastCount = -1;
+    }
+
+    // Called from CoreLibMod.OnUpdate() every frame, unconditionally (cheap no-op when nothing is
+    // pending).
+    public static void TickDeferredRewire()
+    {
+        if (!pendingRewirePolling)
+        {
+            return;
+        }
+
+        int count = RewireVisibleGridNavigation();
+
+        if (count > 0 && count == pendingRewireLastCount)
+        {
+            MelonLoader.MelonLogger.Msg($"[CoreLib][NavDiag] Deferred rewire poll settled at {count} active cells - stopping.");
+            pendingRewirePolling = false;
+            return;
+        }
+
+        pendingRewireLastCount = count;
+        pendingRewirePollTicksLeft--;
+        if (pendingRewirePollTicksLeft <= 0)
+        {
+            MelonLoader.MelonLogger.Warning($"[CoreLib][NavDiag] Deferred rewire poll timed out after {PendingRewireTimeoutTicks} frames without a stable non-zero count (last count={count}) - giving up for this page turn.");
+            pendingRewirePolling = false;
+        }
+    }
 
     // Set by SeedChooserScreen_InjectPagingButtons_Patch right after it confirms a non-empty,
     // sane Grid (its own search already prefers the smallest candidate when more than one
@@ -104,6 +168,27 @@ public static class SeedChooserPaging
         }
 
         return pageIndexByType.TryGetValue(seedType, out int page) && page == currentPage;
+    }
+
+    // CONFIRMED live (via NavDiag) that gating navigation-readiness on whether each cell's icon
+    // Image has visually loaded was the wrong signal entirely: a custom plant's icon can take
+    // several seconds (or apparently never, within any bounded wait) to actually populate -
+    // completely unrelated to whether the cell is structurally correct for the current page. But
+    // grid.childCount itself settles to the exact right count (e.g. 9 for a 9-entry custom page)
+    // almost immediately after a page turn - a purely structural signal, independent of asset
+    // load timing. This is that expected count, computed the same way ApplyPaging assigns pages.
+    public static int GetExpectedCurrentPageCount()
+    {
+        int count = 0;
+        foreach (var type in orderedTypes)
+        {
+            if (pageIndexByType.TryGetValue(type, out int page) && page == currentPage)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     // Recomputes mX/mY (grid position) for whichever entries land past page 0 - never mSeedState,
@@ -189,8 +274,28 @@ public static class SeedChooserPaging
 
         currentPage++;
         ApplyPaging(screen);
+        // REVERTED: tried routing page turns through the full native rebuild (ForceRefresh)
+        // instead of this incremental path, on the theory that ApplyPageVisibility's Add/
+        // RemoveModel reuse skips the proper re-bind (GameObject.SetActive + icon rebind) a fresh
+        // ListBinder.CreateEntry would do for a re-added cached entry. Confirmed live: this
+        // actually FROZE the game on page turn - worse than the original ~3-8s stall this
+        // optimization was built to fix in the first place (more custom plants registered now
+        // than when that number was measured). Full rebuild is not viable; the real fix needs to
+        // target the incremental path specifically, not bypass it.
         SeedChooserDataModel_CustomPlantEntriesPatch.ApplyPageVisibility(dataModel);
+
+        // REVERTED: tried toggling the grid's own active state off/on to replicate whatever
+        // side effect opening/closing the Imitater dialog has (confirmed live that masks the
+        // duplicate-cell corruption, with no lag and no native UpdateEntries() call - so not a
+        // rebuild). Confirmed live this is WORSE: deactivating the grid nulls Unity's
+        // EventSystem.currentSelectedGameObject the instant it happens (since a controller-
+        // focused cell lives inside it), and nothing re-selects a new one on reactivation -
+        // total controller lock-out requiring a mouse click to regain focus, the same "collapsed
+        // to null" failure mode as the original bug this file's history already documents.
+        // Whatever Imitater's dialog does differently, it isn't a bare SetActive toggle on the
+        // grid itself.
         RewireVisibleGridNavigation();
+        BeginPendingRewirePoll();
     }
 
     public static void GoToPreviousPage(SeedChooserDataModel dataModel, SeedChooserScreen screen)
@@ -204,8 +309,28 @@ public static class SeedChooserPaging
 
         currentPage--;
         ApplyPaging(screen);
+        // REVERTED: tried routing page turns through the full native rebuild (ForceRefresh)
+        // instead of this incremental path, on the theory that ApplyPageVisibility's Add/
+        // RemoveModel reuse skips the proper re-bind (GameObject.SetActive + icon rebind) a fresh
+        // ListBinder.CreateEntry would do for a re-added cached entry. Confirmed live: this
+        // actually FROZE the game on page turn - worse than the original ~3-8s stall this
+        // optimization was built to fix in the first place (more custom plants registered now
+        // than when that number was measured). Full rebuild is not viable; the real fix needs to
+        // target the incremental path specifically, not bypass it.
         SeedChooserDataModel_CustomPlantEntriesPatch.ApplyPageVisibility(dataModel);
+
+        // REVERTED: tried toggling the grid's own active state off/on to replicate whatever
+        // side effect opening/closing the Imitater dialog has (confirmed live that masks the
+        // duplicate-cell corruption, with no lag and no native UpdateEntries() call - so not a
+        // rebuild). Confirmed live this is WORSE: deactivating the grid nulls Unity's
+        // EventSystem.currentSelectedGameObject the instant it happens (since a controller-
+        // focused cell lives inside it), and nothing re-selects a new one on reactivation -
+        // total controller lock-out requiring a mouse click to regain focus, the same "collapsed
+        // to null" failure mode as the original bug this file's history already documents.
+        // Whatever Imitater's dialog does differently, it isn't a bare SetActive toggle on the
+        // grid itself.
         RewireVisibleGridNavigation();
+        BeginPendingRewirePoll();
     }
 
     // Confirmed live (via an on-demand nav-dump diagnostic) the actual root cause of a grid
@@ -224,7 +349,11 @@ public static class SeedChooserPaging
     // boundary cells (first/last row, first/last column) keep whatever native already wired for
     // them (e.g. the bottom row's "down" into the Let's Rock button), since those were never the
     // stale/broken links in the first place.
-    public static void RewireVisibleGridNavigation()
+    // Returns the number of active cells actually found and rewired - 0 means "grid not settled
+    // yet" (either not found at all, or grid.childCount doesn't match the current page's expected
+    // count yet), so callers (TickDeferredRewire's poll loop) know to retry rather than trust a
+    // transient/incomplete result.
+    public static int RewireVisibleGridNavigation()
     {
         // Prefer the cached reference (see CachedGrid's own comment) - only fall back to a fresh
         // search if nothing's been cached yet (e.g. this runs before
@@ -260,19 +389,42 @@ public static class SeedChooserPaging
         {
             // Not ready yet (or genuinely not found) - safe to skip, a later page-turn or the
             // next UpdateEntries() call will call this again.
-            return;
+            return 0;
         }
 
-        // Filtering to active cells only, rather than trusting raw sibling index, is cheap
-        // insurance against anything else ever transiently inflating grid.childCount beyond
-        // what's really on screen (confirmed live this could happen: each individual
-        // Add/RemoveModel call in ApplyPageVisibility used to fire its own "Modified" event,
-        // and the view's reaction to it was a full re-sync rather than a surgical diff - 48
-        // separate RemoveModel calls in one page turn meant 48 separate re-syncs, ballooning to
-        // over a thousand children in a single page turn. That's fixed at the source now
-        // (ApplyPageVisibility/PruneToCurrentPage batch all their changes behind
-        // DisableModifiedTrigger and emit exactly one Modified at the end), but this filter costs
-        // nothing and remains a reasonable safety net.
+        // CONFIRMED live (via NavDiag) this is the right readiness gate, not icon population: a
+        // page turn briefly leaves BOTH the old page's cells (not yet destroyed) and the new
+        // page's cells (already instantiated) in the grid at once, inflating childCount past the
+        // real page size for a frame or two - but it settles to EXACTLY the expected count almost
+        // immediately, regardless of how long those new cells' icons take to visually populate
+        // (confirmed live: icons can still be completely unpopulated even 3+ seconds later, on the
+        // very first time a page is ever shown this session - not a caching/reuse issue at all).
+        // Waiting for childCount to match, rather than for icons to load, ties navigation
+        // correctness to a fast structural fact instead of a slow (or seemingly never-completing)
+        // cosmetic one.
+        int expectedCount = GetExpectedCurrentPageCount();
+        if (grid.childCount != expectedCount)
+        {
+            MelonLoader.MelonLogger.Msg($"[CoreLib][NavDiag] RewireVisibleGridNavigation: grid.childCount={grid.childCount} does not yet match expected page count={expectedCount} - not settled, skipping.");
+            return 0;
+        }
+
+        // Identifies a cell by its bound icon sprite's name (falling back to the raw GameObject
+        // name if no populated icon is found) plus GetInstanceID() - used only by the nav-link
+        // summary logged at the end of this method, to make that log human-readable.
+        string IdentifyCell(Transform t)
+        {
+            var img = t.GetComponentInChildren<Image>();
+            string plantName = img != null && img.sprite != null ? img.sprite.name : t.name;
+            return $"{plantName}#{t.gameObject.GetInstanceID()}";
+        }
+
+        // Now that grid.childCount is confirmed to match the expected page count exactly (see the
+        // gate above), every child IS a genuine current-page cell - no icon-population check
+        // needed anymore to tell a real cell apart from a stale leftover, since stale leftovers
+        // can no longer be present once childCount itself has settled. Still filtering on
+        // activeInHierarchy + having a Selectable as cheap insurance against something unrelated
+        // slipping an inactive or non-interactive child in here.
         var activeSelectables = new List<Selectable>();
         for (int i = 0; i < grid.childCount; i++)
         {
@@ -283,10 +435,12 @@ public static class SeedChooserPaging
             }
 
             var selectable = child.GetComponentInChildren<Selectable>();
-            if (selectable != null)
+            if (selectable == null)
             {
-                activeSelectables.Add(selectable);
+                continue;
             }
+
+            activeSelectables.Add(selectable);
         }
 
         var selectables = activeSelectables.ToArray();
@@ -315,6 +469,35 @@ public static class SeedChooserPaging
             if (right != null) nav.selectOnRight = right;
             selectable.navigation = nav;
         }
+
+        // Kept as an ongoing (not temporary) sanity-check log: each active cell's sibling index,
+        // its on-screen RectTransform position, and the four links just computed for it - cheap
+        // once-per-settled-page-turn now that the childCount gate above prevents this from ever
+        // running against a not-yet-settled grid.
+        var dumpLines = new List<string>();
+        for (int i = 0; i < count; i++)
+        {
+            var s = selectables[i];
+            if (s == null)
+            {
+                continue;
+            }
+
+            // GetComponent<RectTransform>, not a direct cast - confirmed live this throws
+            // InvalidCastException for at least one selectable whose own transform isn't a
+            // RectTransform (an uncaught exception here silently aborted this entire diagnostic
+            // every time, which is why nothing ever printed despite the bug reproducing).
+            var rt = s.GetComponent<RectTransform>();
+            string posStr = rt != null ? $"({rt.anchoredPosition.x:F0},{rt.anchoredPosition.y:F0})" : "(no RectTransform)";
+            var nav = s.navigation;
+            string U = nav.selectOnUp != null ? IdentifyCell(nav.selectOnUp.transform) : "-";
+            string D = nav.selectOnDown != null ? IdentifyCell(nav.selectOnDown.transform) : "-";
+            string L = nav.selectOnLeft != null ? IdentifyCell(nav.selectOnLeft.transform) : "-";
+            string R = nav.selectOnRight != null ? IdentifyCell(nav.selectOnRight.transform) : "-";
+            dumpLines.Add($"[{i}] {IdentifyCell(s.transform)} pos={posStr} U={U} D={D} L={L} R={R}");
+        }
+        MelonLoader.MelonLogger.Msg($"[CoreLib][NavDiag] RewireVisibleGridNavigation: {count} active cells (grid.childCount={grid.childCount}):\n" + string.Join("\n", dumpLines));
+        return count;
     }
 }
 
@@ -497,29 +680,43 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
             return;
         }
 
-        // Locate the seed chooser's own panel Transform to parent the cloned buttons under -
-        // same scene-root search path the earlier scrollbar attempt used to find "Grid".
+        // Locate the seed chooser's own panel Transform to parent the cloned buttons under.
         //
-        // Multiple "P_SeedChooser" instances can in principle coexist in the scene (e.g. a stale
-        // copy left behind by an earlier restart never torn down) - considering every candidate
-        // across every root and preferring the smallest sane non-empty Grid, rather than whichever
-        // happens to be first by scene root enumeration order, means a stale/oversized leftover
-        // never gets picked over the real, currently-visible one.
+        // Generic search instead of a single hardcoded wrapper name ("P_SeedChooser") - confirmed
+        // live that at least two OTHER variants exist with their own differently-named wrapper
+        // (versus mode's "P_VsSeedChooser", and a secret level's own variant), each hitting this
+        // exact "never found" failure. Rather than keep hardcoding one more literal name every
+        // time a new special level turns up, this searches for ANY descendant literally named
+        // "SeedChooser" (the one part that's stayed consistent across every variant found so far)
+        // with a real "Grid" child beneath it, then derives the outer wrapper by walking up the
+        // fixed relative structure every variant shares (SeedChooser -> Panel -> Center/center ->
+        // Layout -> Canvas -> wrapper root) instead of needing to know or match the wrapper's own
+        // name at all. This also makes path-casing differences ("Center" vs "center") irrelevant
+        // for free, since nothing here depends on the exact intermediate names either.
+        //
+        // Multiple candidates can in principle coexist in the scene at once (e.g. a stale copy
+        // left behind by an earlier restart, or - confirmed live to be the ACTUAL cause of a real
+        // regression - a previously-visited different screen's own panel, deactivated but still
+        // holding onto its old populated Grid children). Filtering to activeInHierarchy first is
+        // what actually distinguishes a genuine stale leftover from the real current screen; the
+        // "prefer smallest Grid" tie-break alone isn't enough; it doesn't care about activity state
+        // and let a smaller stale grid outrank the real active one once already.
         Transform seedChooserPanel = null;
         Transform seedChooserRoot = null;
         Transform bestGrid = null;
+        bool isVersusScreen = false;
         var activeScene = SceneManager.GetActiveScene();
         foreach (var root in activeScene.GetRootGameObjects())
         {
-            foreach (var candidateRoot in UnityUtil.FindDeepChildrenByName(root.transform, "P_SeedChooser"))
+            foreach (var candidatePanelObject in UnityUtil.FindDeepChildrenByName(root.transform, "SeedChooser"))
             {
-                var candidatePanel = candidateRoot.transform.FindChild("Canvas/Layout/Center/Panel/SeedChooser");
-                if (candidatePanel == null)
+                var panelTransform = candidatePanelObject.transform;
+                if (!panelTransform.gameObject.activeInHierarchy)
                 {
                     continue;
                 }
 
-                var grid = candidatePanel.FindChild("Grid");
+                var grid = panelTransform.FindChild("Grid");
                 if (grid == null || grid.childCount == 0)
                 {
                     continue;
@@ -528,8 +725,16 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
                 if (bestGrid == null || grid.childCount < bestGrid.childCount)
                 {
                     bestGrid = grid;
-                    seedChooserRoot = candidateRoot.transform;
-                    seedChooserPanel = candidatePanel;
+                    seedChooserPanel = panelTransform;
+
+                    var candidateRoot = panelTransform;
+                    for (int hop = 0; hop < 5 && candidateRoot.parent != null; hop++)
+                    {
+                        candidateRoot = candidateRoot.parent;
+                    }
+                    seedChooserRoot = candidateRoot;
+                    isVersusScreen = seedChooserRoot.name.IndexOf("Vs", StringComparison.OrdinalIgnoreCase) >= 0
+                        || seedChooserRoot.name.IndexOf("Versus", StringComparison.OrdinalIgnoreCase) >= 0;
                 }
             }
         }
@@ -563,12 +768,28 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
                 rootNames.Add(root.name);
             }
 
-            MelonLoader.MelonLogger.Warning($"[CoreLib] Gave up looking for a 'P_SeedChooser' hierarchy after {maxPanelSearchFailures} frames ({Time.realtimeSinceStartup - firstAttemptRealtime:F1}s since first attempt) - this screen's seed chooser is likely a different layout entirely (e.g. versus mode). Paging buttons will not be added this session. Scene root objects: " + string.Join(", ", rootNames));
+            MelonLoader.MelonLogger.Warning($"[CoreLib] Gave up looking for any 'SeedChooser'-named hierarchy with a populated Grid after {maxPanelSearchFailures} frames ({Time.realtimeSinceStartup - firstAttemptRealtime:F1}s since first attempt) - this screen's own layout may be fundamentally different (no such object exists at all, not just under a different name). Paging buttons will not be added this session. Scene root objects: " + string.Join(", ", rootNames));
             patchMarker.IsPatched = true;
             return;
         }
 
         SeedChooserPaging.CachedGrid = bestGrid;
+
+        // IsVersusScreen can only be known once this search actually succeeds and identifies
+        // which wrapper the found panel belongs to - but ApplyPaging already ran once before
+        // that, on screen-open, using whatever IsVersusScreen was left over from the PREVIOUS
+        // screen. Recomputing now that it's actually correct fixes the page boundaries for the
+        // very first real page, rather than leaving them wrong until the next page turn happens
+        // to trigger a refresh.
+        if (SeedChooserPaging.IsVersusScreen != isVersusScreen)
+        {
+            SeedChooserPaging.IsVersusScreen = isVersusScreen;
+            SeedChooserPaging.ApplyPaging(__instance);
+            if (dataModel != null)
+            {
+                SeedChooserDataModel_CustomPlantEntriesPatch.ApplyPageVisibility(dataModel);
+            }
+        }
 
         patchMarker.IsPatched = true;
 
