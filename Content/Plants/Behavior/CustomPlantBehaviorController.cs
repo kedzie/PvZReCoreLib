@@ -144,6 +144,22 @@ public class CustomPlantBehaviorController : CustomBehaviorController
         return true;
     }
 
+    // Backs the re-added Plant.IsSpiky Harmony patch (see Plant_IsSpiky_Patch in
+    // PlantPatches.cs) - gates Zombie.SquishAllInSquare's native vehicle-crush handling
+    // (confirmed via decompiled source: it calls both Plant.IsSpiky() and Plant.Squish() as one
+    // routine), which is what makes a Zomboni/similar vehicle instantly destroy itself against a
+    // real Spikeweed/Spikerock instead of squishing it flat - a single native-bundled effect, not
+    // something this hook needs to implement itself. Default false (opt-in only) - unlike
+    // CanBeTargetedBy's "true means don't override" default, this hook's own patch already gates
+    // narrowly enough (CustomContentRegistry.IsValidCustomPlantType, not just "has any
+    // CustomPlantBehaviorController") that a real vanilla Spikeweed's own SpikeweedBehaviorController
+    // is never routed through here at all, so there's no equivalent "don't override" case to
+    // preserve - false is just the correct default for every custom plant that isn't spiky.
+    public virtual bool IsSpiky()
+    {
+        return false;
+    }
+
     public override void Reset()
     {
         base.Reset();
