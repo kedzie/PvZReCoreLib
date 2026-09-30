@@ -89,6 +89,16 @@ public class CustomProjectileDefinition : ProjectileDefinition
     {
         SkinRegistry.RegisterProjectileSkin(skinType);
 
+        // CONFIRMED live: PersistentStorage.Assign is wrong here and crashes hard
+        // (AccessViolationException via an invalid native field-offset lookup, "Field
+        // m_defaultSkin was not found on class BloomerangProjectileDefinition"). Unlike
+        // CustomPlantDefinition.m_defaultSkin (a genuine NATIVE field inherited from the game's own
+        // PlantDefinition, which is exactly what PersistentStorage.Assign is for), m_defaultSkin
+        // here is a field WE declared directly on CustomProjectileDefinition - not part of real
+        // IL2CPP class metadata for a derived type like BloomerangProjectileDefinition at all - so
+        // a plain C# assignment is the correct, safe way to set it. The actual cause of the
+        // originally-reported "projectiles invisible, ApplySkin never called" bug is still
+        // unconfirmed and needs real diagnostic data, not another guess.
         if (string.IsNullOrEmpty(m_defaultSkin))
         {
             m_defaultSkin = skinType.GetSkinId();
@@ -211,7 +221,7 @@ public class Projectile_Update_Patch
         {
             return;
         }
-        
+
         if(__instance.mController.gameObject.TryGetComponent(out CustomProjectileBehaviorController customProjectileBehavior))
         {
             customProjectileBehavior.PostUpdate();

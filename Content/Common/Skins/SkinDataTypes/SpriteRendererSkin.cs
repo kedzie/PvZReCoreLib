@@ -1,4 +1,4 @@
-﻿using Il2CppReloaded.Characters;
+using Il2CppReloaded.Characters;
 using Il2CppSource.Controllers;
 using MelonLoader;
 using PvZReCoreLib.Content.Common.Audio;
@@ -14,7 +14,7 @@ public abstract class SpriteRendererSkin : SkinType
 
     public string AssetBundleId;
     public string SkinPrefabId;
-    
+
     public Vector3 ScaleOverride = Vector3.one;
 
     #endregion
@@ -35,6 +35,10 @@ public abstract class SpriteRendererSkin : SkinType
             var instance = UnityEngine.Object.Instantiate(skinGameObject, obj.transform, false);
             instance.SetName("SpriteRendererSkin");
             instance.transform.localScale = ScaleOverride;
+
+            // Defensive - ensures the skin is visible even if a future prefab/bundle change ever
+            // saves it inactive; harmless no-op for already-active skins.
+            instance.SetActive(true);
 
             instance.transform.Find("anim").gameObject.AddComponent<AnimationScripts>();
 
@@ -80,13 +84,13 @@ public abstract class SpriteRendererSkin : SkinType
         {
             return;
         }
-        
+
         var spriteAnimator = existingChild.GetComponent<Animator>();
         if (spriteAnimator == null)
         {
             return;
         }
-        
+
         if(spriteAnimator.GetCurrentStateName(0) == animationName)
         {
             return;

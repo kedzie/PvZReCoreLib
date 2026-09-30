@@ -129,7 +129,7 @@ public class RegistryBridge
     }
     
     public static void RegisterAssetFromAssetBundle<T>(string assetBundleKey, string assetPath,
-        Action<string> resultCallback = null, string keyOverride = null) where T : Object
+        Action<string> resultCallback = null, string keyOverride = null) where T : UnityEngine.Object
     {
         Action<T> assetCallback = (T asset) =>
         {
@@ -138,17 +138,38 @@ public class RegistryBridge
         };
         LoadAssetFromAssetBundle<T>(assetBundleKey, assetPath, assetCallback);
     }
-    public static void LoadAssetFromAssetBundle<T>(string assetBundleKey, string assetPath, Action<T> resultCallback) where T : Object
+    // CONFIRMED live: this mod requires MelonLoader 0.7.3+ (its Il2CppInterop bump broke the
+    // original async m_completeCallback-based loading entirely - AccessViolationException combining
+    // onto it; a plain assignment stops the crash but the callback never fires; polling
+    // isDone/allAssets both crash too - see git history for the full chain). LoadAsset<T> (a raw
+    // IntPtr return, no array/Span marshaling) is what actually works on 0.7.3.
+    //
+    // The LoadAssetWithSubAssets<T> fallback below is NOT a real 0.7.2 compatibility guarantee -
+    // 0.7.2 was investigated and explicitly dropped (see CHANGELOG/release notes: v1.15 is the last
+    // 0.7.2-supported release, this codebase moves to 0.7.3+ only from here). On this game's Unity
+    // 6000 build under 0.7.2, LoadAsset<T>'s icall isn't even registered at all, and this fallback's
+    // OWN icall (LoadAssetWithSubAssets_Internal) separately throws MissingMethodException on
+    // 'Il2CppSystem.ReadOnlySpan`1.GetPinnableReference()' for at least AudioClip - and that failure
+    // happens inside Il2CppInterop's own native->managed trampoline, so it can't even be caught here
+    // to fall back further. This is kept purely as harmless, zero-cost insurance in case some future
+    // Il2CppInterop build regresses LoadAsset<T> the same way it regressed the old async path - not
+    // as a claim that this mod works on 0.7.2.
+    public static void LoadAssetFromAssetBundle<T>(string assetBundleKey, string assetPath, Action<T> resultCallback) where T : UnityEngine.Object
     {
         Il2CppAssetBundle assetBundle = AssetBundlesMap[assetBundleKey];
-        
-        var assetRequest = assetBundle.LoadAssetWithSubAssetsAsync(assetPath);
-        assetRequest.m_completeCallback += (Il2CppSystem.Action<AsyncOperation>)((AsyncOperation operation) =>
+
+        T asset;
+        try
         {
-            T asset = operation.Cast<AssetBundleRequest>().allAssets.First().Cast<T>();
-            PersistentStorage.Store(asset);
-            resultCallback.Invoke(asset);
-        });
+            asset = assetBundle.LoadAsset<T>(assetPath);
+        }
+        catch (Exception)
+        {
+            asset = assetBundle.LoadAssetWithSubAssets<T>(assetPath).First();
+        }
+
+        PersistentStorage.Store(asset);
+        resultCallback.Invoke(asset);
     }
     
     public static string RegisterObject(Object obj, string keyOverride = null)

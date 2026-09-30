@@ -27,12 +27,12 @@ public class Projectile_ProjectileInitialize_Patch
     {
         UniqueIdExtension uniqueIdExt = UniqueIdExtension.GetOrCreateExtension<UniqueIdExtension>(__instance);
         uniqueIdExt.RandomizeUniqueId();
-        
+
         ProjectileExtension ext = ProjectileExtension.GetOrCreateExtension<ProjectileExtension>(__instance.mController.gameObject);
         ext.source = __instance;
-        
+
         Type behaviorType = null;
-        
+
         ProjectileDefinition projectileDef = AppCore.GetService<IDataService>().Cast<DataService>().GetProjectileDefinition(__instance.mProjectileType);
         CustomProjectileDefinition customDef = projectileDef.TryCast<CustomProjectileDefinition>();
         if (CustomContentRegistry.IsValidCustomProjectileType(__instance.mProjectileType))
@@ -47,7 +47,7 @@ public class Projectile_ProjectileInitialize_Patch
                 {
                     ext.CurrentSkin.CleanUpSkin(__instance.mController.gameObject);
                 }
-                
+
                 if (SkinRegistry.ProjectileSkins.ContainsKey(customDef.m_defaultSkin))
                 {
                     IProjectileSkin skin = SkinRegistry.ProjectileSkins[customDef.m_defaultSkin];

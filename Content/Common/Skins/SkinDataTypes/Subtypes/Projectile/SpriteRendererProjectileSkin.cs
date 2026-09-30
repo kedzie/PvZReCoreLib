@@ -33,7 +33,13 @@ public class SpriteRendererProjectileSkin : SpriteRendererSkin, IProjectileSkin
             }
             
             var go = goT.gameObject;
-            if (go == null || go.name == "Shadow")
+            // CONFIRMED live: this loop hides the native Pea prefab's own original sprite
+            // children so the custom skin shows in their place - but base.ApplySkin(obj) above
+            // already added OUR OWN "SpriteRendererSkin" child as another sibling before this
+            // loop runs, and this loop only knew to skip "Shadow" - it was deactivating our own
+            // just-created skin in the same synchronous call, every single time, before it ever
+            // had a chance to render. Excluding it by name fixes that.
+            if (go == null || go.name == "Shadow" || go.name == "SpriteRendererSkin")
             {
                 continue;
             }

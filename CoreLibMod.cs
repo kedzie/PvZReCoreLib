@@ -5,9 +5,8 @@ using PvZReCoreLib.Content;
 using PvZReCoreLib.Content.Common.Skins;
 using PvZReCoreLib.Content.Plants.Patches;
 using PvZReCoreLib.Util;
-using UnityEngine.SceneManagement;
 
-[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.5", "Draco9990 & Kedzie")]
+[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.6", "Draco9990 & Kedzie")]
 [assembly: MelonGame("PopCap Games", "PvZ Replanted")]
 
 namespace PvZReCoreLib;
@@ -32,17 +31,26 @@ public class CoreLibMod : MelonMod
 
     #region Methods
 
-    public override void OnGUI()
+    // CONFIRMED live under MelonLoader 0.7.3: this used to be driven by OnGUI() (checking the
+    // active scene every IMGUI callback and calling FirstTimeInit() once "Frontend" was reached).
+    // Under 0.7.3, OnGUI() apparently no longer fires reliably for this game/interop combination
+    // (Il2CppInterop was bumped to 1.5.1-ci.845 in that release) - FirstTimeInit() never ran at
+    // all, silently: CustomContentRegistry.Init() never ran, so its PostInit event never fired, so
+    // every mod's own CustomContentRegistry.PostInit += (...) callback (registered fine via the
+    // real OnLateInitializeMelon hook) never actually executed - zero custom plants registered,
+    // no seed packets, no rendered custom plants, with no exception anywhere since nothing ever
+    // threw. CONFIRMED live switching to this fixed that. OnSceneWasLoaded is a real, event-driven
+    // MelonMod lifecycle hook for exactly this "run once when scene X loads" need, not a per-frame
+    // poll racing against whether OnGUI happens to fire at all. (This also surfaced a second,
+    // separate bug - RegistryBridge.LoadAssetFromAssetBundle crashing under 0.7.3's Il2CppInterop
+    // - already fixed there; the two are unrelated except that this hook is what exposed it.)
+    public override void OnSceneWasLoaded(int buildIndex, string sceneName)
     {
-        base.OnGUI();
+        base.OnSceneWasLoaded(buildIndex, sceneName);
 
-        if (!Initd)
+        if (!Initd && sceneName == "Frontend")
         {
-            var scene = SceneManager.GetActiveScene();
-            if (scene.name == "Frontend")
-            {
-                FirstTimeInit();
-            }
+            FirstTimeInit();
         }
     }
 
