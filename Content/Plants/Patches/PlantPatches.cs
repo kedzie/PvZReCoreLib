@@ -214,42 +214,14 @@ public class Board_PostDeserialize_ReattachCustomPlantBehavior_Patch
     }
 }
 
-[HarmonyPatch(typeof(Plant), nameof(Plant.IsSpiky))]
-public class Plant_IsSpiky_Patch
-{
-    // Re-added with the narrower gate this patch's own removal commit called for: a bare
-    // TryGetComponent<CustomPlantBehaviorController> check also matches a real vanilla
-    // Spikeweed/Spikerock (they carry SpikeweedBehaviorController, itself a
-    // CustomPlantBehaviorController, purely so CoreLib can "manage" them for unrelated reasons -
-    // see that class's own comment). Since this hook's default is false ("don't intercept"
-    // doesn't exist here the way it does for CanBeTargetedBy - see IsSpiky()'s own comment),
-    // intercepting a real Spikeweed unconditionally forced it to false, silently breaking the
-    // native "Zomboni instantly destroys itself against a spiky plant" interaction with no
-    // exception anywhere (CONFIRMED live the first time this shipped, before being reverted).
-    // Requiring CustomContentRegistry.IsValidCustomPlantType(mSeedType) too means this can only
-    // ever fire for a genuine custom SeedType - never a vanilla one, no matter what behavior
-    // controller it happens to carry.
-    public static bool Prefix(Plant __instance, ref bool __result)
-    {
-        if (__instance == null || __instance.mController == null || __instance.mController.gameObject == null)
-        {
-            return true;
-        }
-
-        if (!CustomContentRegistry.IsValidCustomPlantType(__instance.mSeedType))
-        {
-            return true;
-        }
-
-        if (!__instance.mController.gameObject.TryGetComponent(out CustomPlantBehaviorController comp))
-        {
-            return true;
-        }
-
-        __result = comp.IsSpiky();
-        return false;
-    }
-}
+// DO NOT re-add a Harmony patch on Plant.IsSpiky. It shipped in CoreLib 1.5/1.6 and crashed the
+// game: the native function is only 17 bytes (cmp [rcx+70h],15h / je short / cmp [rcx+70h],2Eh /
+// sete al / ret / mov al,1 / ret) and the detour breaks its short `je`, which is taken only for a
+// vanilla Spikeweed. Any zombie evaluating a real Spikeweed through Zombie.CanTargetPlant /
+// CheckSquish / FindCatapultTarget / SquishAllInSquare died with 0x80000003 at IsSpiky+0x12 (the
+// int3 padding after the function = the je target + 4). Seven identical crash dumps, found via
+// the Windows minidumps (native crashes never reach the MelonLoader log). Hooking a larger caller
+// instead would avoid it; CustomPlantBehaviorController.IsSpiky() is currently unhooked.
 
 [HarmonyPatch(typeof(Zombie), nameof(Zombie.CanTargetPlant), new[] { typeof(Plant), typeof(ZombieAttackType) })]
 public class Zombie_CanTargetPlant_Patch
@@ -257,10 +229,8 @@ public class Zombie_CanTargetPlant_Patch
     // Only intervenes (skips native) when the plant's own controller
     // explicitly vetoes being targeted; otherwise falls through to native
     // logic unchanged (default CanBeTargetedBy is true), which already
-    // handles pools/ladders/flowerpots/IsSpiky correctly on its own - unlike
-    // Plant_IsSpiky_Patch above (whose own default is false, not "don't
-    // override"), this one is safe for vanilla plants that happen to have a
-    // CoreLib-managed behavior controller
+    // handles pools/ladders/flowerpots/IsSpiky correctly on its own. Safe for
+    // vanilla plants that happen to have a CoreLib-managed behavior controller
     // (e.g. Spikeweed's SpikeweedBehaviorController) since "true" here means
     // "don't override," not a definitive answer that could clash with
     // native behavior.
