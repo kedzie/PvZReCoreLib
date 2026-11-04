@@ -6,7 +6,7 @@ using PvZReCoreLib.Content.Common.Skins;
 using PvZReCoreLib.Content.Plants.Patches;
 using PvZReCoreLib.Util;
 
-[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.7", "Draco9990 & Kedzie")]
+[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.8", "Draco9990 & Kedzie")]
 [assembly: MelonGame("PopCap Games", "PvZ Replanted")]
 
 namespace PvZReCoreLib;

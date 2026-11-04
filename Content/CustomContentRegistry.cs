@@ -6,6 +6,7 @@ using PvZReCoreLib.Content.Plants;
 using PvZReCoreLib.Content.Projectiles;
 using PvZReCoreLib.Util;
 using UnityEngine;
+using UnityEngine.AddressableAssets;
 
 namespace PvZReCoreLib.Content;
 
@@ -94,6 +95,28 @@ public class CustomContentRegistry
             PersistentStorage.Store(plantData);
         }
         
+        // Versus mode's chooser and seed bank read these dedicated Versus* fields instead of
+        // PlantImage/SeedCost/RefreshTime. CustomPlantDefinition nulls m_versusImage and leaves the
+        // other three at 0, so without this a custom plant shows up in Versus as a blank card.
+        // Mirrors the normal values; a definition that deliberately sets its own Versus values
+        // (non-null image / non-zero numbers) is left alone.
+        if (plantData.m_versusImage == null && plantData.m_plantImage != null)
+        {
+            plantData.m_versusImage = PersistentStorage.Store(new AssetReferenceSprite(plantData.m_plantImage.m_AssetGUID));
+        }
+        if (plantData.m_versusCost == 0)
+        {
+            plantData.m_versusCost = plantData.m_seedCost;
+        }
+        if (plantData.m_versusBaseRefreshTime == 0)
+        {
+            plantData.m_versusBaseRefreshTime = plantData.m_refreshTime;
+        }
+        if (plantData.m_versusSuddenDeathRefreshTime == 0)
+        {
+            plantData.m_versusSuddenDeathRefreshTime = plantData.m_refreshTime;
+        }
+
         _customSeedTypes.Add(plantData.SeedType);
 
         _customPlantDefinitions[plantData.SeedType] = plantData;

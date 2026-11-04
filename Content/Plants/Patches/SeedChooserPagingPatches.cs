@@ -85,7 +85,14 @@ public static class SeedChooserPaging
     // on how long this async populate can actually take.
     private const int PendingRewireTimeoutTicks = 60;
 
-    private static void BeginPendingRewirePoll()
+    // Versus only: the cloned next/previous buttons, chained onto the plant grid's right edge by
+    // RewireVisibleGridNavigation (the grid's cells are rebuilt every page turn, so those links
+    // have to be re-applied each time). Focus follows whichever player's turn it is, so only the
+    // plant grid ever navigates to them.
+    public static Selectable VersusPrevButton { get; set; }
+    public static Selectable VersusNextButton { get; set; }
+
+    public static void BeginPendingRewirePoll()
     {
         pendingRewirePolling = true;
         pendingRewirePollTicksLeft = PendingRewireTimeoutTicks;
@@ -218,6 +225,14 @@ public static class SeedChooserPaging
             }
 
             bool isRealVanilla = (int)cs.mSeedType < VanillaCount;
+
+            // Versus never offers the upgrade plants (Gatling Pea ... Cob Cannon) - native keeps their
+            // chooser entries but locked, which rendered as a blank first row on page 2 once the 40
+            // basic plants had filled page 1. They don't belong on any page there.
+            if (IsVersusScreen && isRealVanilla && Plant.IsUpgrade(cs.mSeedType))
+            {
+                continue;
+            }
             bool isRealCustom = CustomContentRegistry.IsValidCustomPlantType(cs.mSeedType);
             if (!isRealVanilla && !isRealCustom)
             {
@@ -403,7 +418,11 @@ public static class SeedChooserPaging
         // correctness to a fast structural fact instead of a slow (or seemingly never-completing)
         // cosmetic one.
         int expectedCount = GetExpectedCurrentPageCount();
-        if (grid.childCount != expectedCount)
+
+        // Versus' grid keeps an inactive template cell and an entry for the Imitater alongside the
+        // real cells, so childCount never equals the page count there (confirmed live: 20 vs 18,
+        // stable for 60+ frames). Its real cells are counted by active Selectables below instead.
+        if (!IsVersusScreen && grid.childCount != expectedCount)
         {
             MelonLoader.MelonLogger.Msg($"[CoreLib][NavDiag] RewireVisibleGridNavigation: grid.childCount={grid.childCount} does not yet match expected page count={expectedCount} - not settled, skipping.");
             return 0;
@@ -446,6 +465,12 @@ public static class SeedChooserPaging
         var selectables = activeSelectables.ToArray();
         int count = selectables.Length;
 
+        if (IsVersusScreen && count != expectedCount)
+        {
+            MelonLoader.MelonLogger.Msg($"[CoreLib][NavDiag] RewireVisibleGridNavigation (versus): {count} active cell(s) (grid.childCount={grid.childCount}) vs expected page count={expectedCount} - not settled, skipping.");
+            return 0;
+        }
+
         for (int i = 0; i < count; i++)
         {
             var selectable = selectables[i];
@@ -468,6 +493,41 @@ public static class SeedChooserPaging
             if (left != null) nav.selectOnLeft = left;
             if (right != null) nav.selectOnRight = right;
             selectable.navigation = nav;
+        }
+
+        // Versus: the end of every row (and the last cell of a partial row) hands off to the page
+        // buttons, which then step previous -> next. Only ever overwrites a "right" that was left
+        // empty by the same-page neighbor logic above.
+        if (IsVersusScreen && VersusPrevButton != null && VersusNextButton != null && count > 0)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                var selectable = selectables[i];
+                if (selectable == null)
+                {
+                    continue;
+                }
+
+                bool endsRow = (i % GridColumns) == GridColumns - 1 || i == count - 1;
+                if (endsRow)
+                {
+                    var nav = selectable.navigation;
+                    nav.mode = Navigation.Mode.Explicit;
+                    nav.selectOnRight = VersusPrevButton;
+                    selectable.navigation = nav;
+                }
+            }
+
+            var prevNav = VersusPrevButton.navigation;
+            prevNav.mode = Navigation.Mode.Explicit;
+            prevNav.selectOnLeft = selectables[count - 1];
+            prevNav.selectOnRight = VersusNextButton;
+            VersusPrevButton.navigation = prevNav;
+
+            var nextNav = VersusNextButton.navigation;
+            nextNav.mode = Navigation.Mode.Explicit;
+            nextNav.selectOnLeft = VersusPrevButton;
+            VersusNextButton.navigation = nextNav;
         }
 
         // Kept as an ongoing (not temporary) sanity-check log: each active cell's sibling index,
@@ -930,6 +990,17 @@ public class SeedChooserScreen_InjectPagingButtons_Patch
                 SetHorizontalNav(previousButton, left: imitatorSlot, right: nextButton);
                 SetHorizontalNav(nextButton, left: previousButton, right: viewStore);
                 SetHorizontalNav(viewStore, left: nextButton);
+            }
+            else if (isVersusScreen)
+            {
+                // Versus has no Imitator slot or ViewStore button. The page buttons hang off the
+                // plant grid instead - see RewireVisibleGridNavigation.
+                SeedChooserPaging.VersusPrevButton = buttons[0];
+                SeedChooserPaging.VersusNextButton = buttons[1];
+                SetHorizontalNav(buttons[0], right: buttons[1]);
+                SetHorizontalNav(buttons[1], left: buttons[0]);
+                SeedChooserPaging.RewireVisibleGridNavigation();
+                SeedChooserPaging.BeginPendingRewirePoll();
             }
             else
             {
