@@ -67,6 +67,13 @@ public static class ZombiePushBack
             return;
         }
 
+        // A gravestone is a Zombie object internally (so it takes damage like one) but is scenery:
+        // it must be hurt by a hit, never shoved down the lane.
+        if (zombie.mZombieType == ZombieType.Gravestone)
+        {
+            return;
+        }
+
         float rightEdge = board != null ? board.GridToPixelX(LastColumnIndex, zombie.mRow) : float.PositiveInfinity;
 
         float targetX = Mathf.Min(zombie.mPosX + distance, rightEdge);
