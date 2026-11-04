@@ -63,7 +63,12 @@ public static class SeedChooserPaging
     // fixed page size above applies.
     public static bool IsVersusScreen { get; set; }
 
-    private static int PageSize => IsVersusScreen ? VersusPageSize : AdventurePageSize;
+    // Versus' page size is not really fixed: VersusPageSize above is only what vanilla offers.
+    // ApplyPaging sets this to the number of vanilla plants the chooser actually presents (rounded
+    // up to whole rows), so a mod that lifts the upgrade-plant ban gets all 48 on page 1.
+    private static int versusPageSize = VersusPageSize;
+
+    private static int PageSize => IsVersusScreen ? versusPageSize : AdventurePageSize;
 
     private static int currentPage = 0;
     private static int lastPageCount = 1;
@@ -210,6 +215,8 @@ public static class SeedChooserPaging
         orderedTypes.Clear();
         pageIndexByType.Clear();
 
+        int vanillaOffered = 0;
+
         foreach (var cs in screen.mChosenSeeds)
         {
             // Imitater sits inside the "vanilla" SeedType range (48, right after the 48 real
@@ -226,12 +233,19 @@ public static class SeedChooserPaging
 
             bool isRealVanilla = (int)cs.mSeedType < VanillaCount;
 
-            // Versus never offers the upgrade plants (Gatling Pea ... Cob Cannon) - native keeps their
-            // chooser entries but locked, which rendered as a blank first row on page 2 once the 40
-            // basic plants had filled page 1. They don't belong on any page there.
+            // Vanilla Versus never offers the upgrade plants (Gatling Pea ... Cob Cannon) - native
+            // keeps their chooser entries but locked, which rendered as a blank first row on page 2
+            // once the 40 basic plants had filled page 1. Dropped only while the game's own Versus
+            // ban still applies to them: a mod that lifts that ban (SeedNotAllowedToPick) gets them
+            // as real, selectable cards instead of having them hidden here.
             if (IsVersusScreen && isRealVanilla && Plant.IsUpgrade(cs.mSeedType))
             {
-                continue;
+                bool banned = screen.SeedNotAllowedToPick(cs.mSeedType);
+                MelonLoader.MelonLogger.Msg($"[CoreLib][SeedChooserDiag] Versus upgrade {cs.mSeedType}: SeedNotAllowedToPick={banned} -> {(banned ? "hidden" : "kept")}.");
+                if (banned)
+                {
+                    continue;
+                }
             }
             bool isRealCustom = CustomContentRegistry.IsValidCustomPlantType(cs.mSeedType);
             if (!isRealVanilla && !isRealCustom)
@@ -240,6 +254,15 @@ public static class SeedChooserPaging
             }
 
             orderedTypes.Add(cs.mSeedType);
+            if (isRealVanilla)
+            {
+                vanillaOffered++;
+            }
+        }
+
+        if (IsVersusScreen)
+        {
+            versusPageSize = Math.Clamp((vanillaOffered + GridColumns - 1) / GridColumns * GridColumns, GridColumns, AdventurePageSize);
         }
 
         lastPageCount = Math.Max(1, (orderedTypes.Count + PageSize - 1) / PageSize);
