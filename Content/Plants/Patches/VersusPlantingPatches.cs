@@ -16,7 +16,9 @@ namespace PvZReCoreLib.Content.Plants.Patches;
 // PlantPatches.cs). Instead the game mode on the level data - the exact field IsVersusMode() reads -
 // is flipped to None for the duration of one click that is holding a custom plant, and restored
 // afterwards (Finalizer, so a throw can't leave the match stuck in the wrong mode). With the mode
-// off, native takes its ordinary planting path. Vanilla seeds and the zombie player's own clicks
+// off, native takes its ordinary planting path. That also drops Versus' own placement rules, so the
+// Prefix first asks native's CanPlantAt (mode still on) and swallows the click when Versus rejects
+// the cell (VSNotHere / VSSuddenDeath) - otherwise plants could go in the zombie zone. Vanilla seeds and the zombie player's own clicks
 // never match the custom-seed condition, so they are untouched.
 [HarmonyPatch(typeof(Board), "MouseDownWithPlant")]
 public class Board_MouseDownWithPlant_VersusCustomSeed_Patch
@@ -24,30 +26,45 @@ public class Board_MouseDownWithPlant_VersusCustomSeed_Patch
     private static LevelEntryData flippedLevelData;
     private static ReloadedGameMode savedMode;
 
-    static void Prefix(Board __instance, int playerIndex)
+    static bool Prefix(Board __instance, int x, int y, int playerIndex)
     {
         flippedLevelData = null;
 
         var app = __instance.mApp;
         if (app == null || !app.IsVersusMode())
         {
-            return;
+            return true;
         }
 
-        if (!CustomContentRegistry.IsValidCustomPlantType(__instance.GetSeedTypeInCursor(playerIndex)))
+        var seedType = __instance.GetSeedTypeInCursor(playerIndex);
+        if (!CustomContentRegistry.IsValidCustomPlantType(seedType))
         {
-            return;
+            return true;
         }
 
         var levelData = app.LevelData;
         if (levelData == null)
         {
-            return;
+            return true;
+        }
+
+        // Turning Versus off for the click also turns off native's Versus placement rules - without
+        // this, custom plants could be planted behind enemy lines in the zombie zone. Ask native
+        // whether the Versus rules allow this cell while the mode is still on, and drop the click if
+        // they don't. Every other rejection (occupied cell, water, etc.) is left to native's normal
+        // handling once the mode is flipped below.
+        int gridX = __instance.PlantingPixelToGridX(x, y, seedType);
+        int gridY = __instance.PlantingPixelToGridY(x, y, seedType);
+        var reason = __instance.CanPlantAt(gridX, gridY, seedType);
+        if (reason == PlantingReason.VSNotHere || reason == PlantingReason.VSSuddenDeath)
+        {
+            return false;
         }
 
         savedMode = levelData.m_reloadedGameMode;
         levelData.m_reloadedGameMode = ReloadedGameMode.None;
         flippedLevelData = levelData;
+        return true;
     }
 
     static Exception Finalizer(Exception __exception)
