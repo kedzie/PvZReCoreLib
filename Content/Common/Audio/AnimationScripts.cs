@@ -54,9 +54,12 @@ public class AnimationScripts : MonoBehaviour
         }
     }
 
+    // Animation Event with no parameter, baked at the attack clip's launch frame (see
+    // CustomPlantBehaviorController.OnAnimationAttackEvent).
     public void ExecuteAttack()
     {
-        
+        PlantExtension ple = PlantExtension.GetExtension<PlantExtension>(GetMainGameObject());
+        ple?.CustomBehaviorController?.OnAnimationAttackEvent();
     }
 
     public void OwnerDie()

@@ -105,6 +105,13 @@ public class CustomPlantBehaviorController : CustomBehaviorController
         OnLaunchCounterTriggeredEvent?.Invoke();
     }
 
+    // Called by an "ExecuteAttack" Animation Event baked on the plant's attack clip at the frame
+    // the PAM marks as its launch frame (use_action), so the throw follows the game's animation
+    // speed instead of a code-side timer. Default is a no-op.
+    public virtual void OnAnimationAttackEvent()
+    {
+    }
+
     public Action OnMintEffectStartEvent;
     public virtual void OnMintEffectStart()
     {
