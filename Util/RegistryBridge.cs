@@ -94,11 +94,20 @@ public class RegistryBridge
 
     public static Il2CppAssetBundle RegisterAssetBundle(string assetBundleKey, string assetBundlePath)
     {
-        var stream = File.OpenRead(assetBundlePath);
-        AssetBundlesMap.Add(assetBundleKey, Il2CppAssetBundleManager.LoadFromStream(stream));
-        stream.Close();
-        
-        return AssetBundlesMap[assetBundleKey];
+        // LoadFromFile lets Unity read the bundle itself (chunk-based LZ4 bundles are then streamed
+        // from disk on demand). LoadFromStream pushed every byte through a managed Stream first,
+        // which dominated game startup once dozens of bundles were registered.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var bundle = Il2CppAssetBundleManager.LoadFromFile(System.IO.Path.GetFullPath(assetBundlePath));
+        if (bundle == null)
+        {
+            throw new System.IO.FileLoadException($"[CoreLib] Could not load asset bundle '{assetBundlePath}' (key '{assetBundleKey}').");
+        }
+
+        AssetBundlesMap.Add(assetBundleKey, bundle);
+        MelonLogger.Msg($"[CoreLib] Loaded asset bundle '{assetBundleKey}' in {timer.ElapsedMilliseconds} ms ({new System.IO.FileInfo(assetBundlePath).Length / 1048576} MB)");
+
+        return bundle;
     }
     
     public static void RegisterSpriteFromAssetBundle(string assetBundleKey, string assetPath, 
