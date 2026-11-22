@@ -194,21 +194,136 @@ public class SeedChooserScreen_ClickedSeedInChooser_Patch
     }
 }
 
+// Native FindSeedInBank(index, playerIndex) only ever searches the vanilla SeedTypes 0-48 (plus the
+// zombie list), matching on state == SeedInBank, mSeedIndexInBank == index AND
+// mPlayerIndex == playerIndex (the player check is skipped only in Adventure mode). CONFIRMED from
+// the decompiled method: a custom plant is never found, so the native result is None and this
+// Postfix fills it in. CloseSeedChooser calls it once per seat in EVERY player's bank
+// (<CloseSeedChooser>b__66_0 -> FindSeedInBank(i, info.PlayerIndex)) to build each player's
+// SeedPacket list.
+//
+// The old fallback matched on state + bank index only, with NO player check. In co-op both banks
+// have an entry at index 0, 1, 2, ...: whichever seed in mChosenSeeds came first with that index
+// answered for BOTH players, so player 2's bank was built from player 1's picks (or the other way
+// round, depending on list order) - "both players end up with the same plants". Vanilla picks were
+// right (native matches the player); a custom plant, or a vanilla seat that shares an index with
+// the other player's custom pick, was wrong.
+//
+// Fix: match the player like native does. Co-op never falls back to another player's seed at all.
+// Everything else (adventure, versus) keeps the old lenient second pass so nothing that already
+// worked can regress.
 [HarmonyPatch(typeof(SeedChooserScreen), nameof(SeedChooserScreen.FindSeedInBank))]
 public class SeedChooserScreen_FindSeedInBank_Patch
 {
     public static void Postfix(ref SeedChooserScreen __instance, int theIndexInBank, int playerIndex, ref SeedType __result)
     {
-        if (__result == SeedType.None)
+        bool coop = false;
+        try
         {
-            foreach (var chosenSeed in __instance.mChosenSeeds)
+            coop = __instance.mApp != null && __instance.mApp.IsCoopMode();
+        }
+        catch
+        {
+        }
+
+        if (coop)
+        {
+            DumpPicksOncePerFrame(__instance);
+        }
+
+        if (__result != SeedType.None)
+        {
+            return;
+        }
+
+        // Pass 1: the seed THIS player put in THIS bank slot.
+        foreach (var chosenSeed in __instance.mChosenSeeds)
+        {
+            if (chosenSeed.mSeedState == ChosenSeedState.SeedInBank && chosenSeed.mSeedIndexInBank == theIndexInBank && chosenSeed.mPlayerIndex == playerIndex)
             {
-                if (chosenSeed.mSeedState == ChosenSeedState.SeedInBank && chosenSeed.mSeedIndexInBank == theIndexInBank)
-                {
-                    __result = chosenSeed.mSeedType;
-                    return;
-                }
+                __result = chosenSeed.mSeedType;
+                LogCoop(coop, theIndexInBank, playerIndex, __result, "matched player");
+                return;
             }
+        }
+
+        if (coop)
+        {
+            // Never hand a co-op player the other player's seed.
+            return;
+        }
+
+        // Pass 2 (legacy, adventure/versus only): any player's seed at that bank index.
+        foreach (var chosenSeed in __instance.mChosenSeeds)
+        {
+            if (chosenSeed.mSeedState == ChosenSeedState.SeedInBank && chosenSeed.mSeedIndexInBank == theIndexInBank)
+            {
+                __result = chosenSeed.mSeedType;
+                return;
+            }
+        }
+    }
+
+    // [CoreLib][CoopDiag]: the final seat -> plant assignment of each player's bank, as the game
+    // builds the seed banks. Co-op only (single-player/versus would just be noise).
+    private static void LogCoop(bool coop, int index, int playerIndex, SeedType result, string how)
+    {
+        if (coop)
+        {
+            MelonLoader.MelonLogger.Msg($"[CoreLib][CoopDiag] FindSeedInBank(slot {index}, player {playerIndex}) -> {result} (custom plant, {how}).");
+        }
+    }
+
+    private static int lastDumpFrame = -1;
+
+    // [CoreLib][CoopDiag] What each player has picked, as the banks are being built (CloseSeedChooser
+    // calls FindSeedInBank for every seat of every bank in the same frame, so one dump per frame).
+    // Deliberately not a separate patch on OnStartButton: one more Harmony patch that fails to apply
+    // would abort PatchAll for everything after it.
+    private static void DumpPicksOncePerFrame(SeedChooserScreen screen)
+    {
+        if (lastDumpFrame == Time.frameCount)
+        {
+            return;
+        }
+        lastDumpFrame = Time.frameCount;
+
+        try
+        {
+            var perPlayer = new SortedDictionary<int, SortedDictionary<int, SeedType>>();
+            foreach (var cs in screen.mChosenSeeds)
+            {
+                if (cs.mSeedState != ChosenSeedState.SeedInBank)
+                {
+                    continue;
+                }
+
+                if (!perPlayer.TryGetValue(cs.mPlayerIndex, out var bank))
+                {
+                    bank = new SortedDictionary<int, SeedType>();
+                    perPlayer[cs.mPlayerIndex] = bank;
+                }
+
+                bank[cs.mSeedIndexInBank] = cs.mSeedType;
+            }
+
+            var lines = new List<string>();
+            foreach (var player in perPlayer)
+            {
+                var seats = new List<string>();
+                foreach (var seat in player.Value)
+                {
+                    seats.Add($"{seat.Key}={seat.Value}");
+                }
+
+                lines.Add($"  player {player.Key}: " + string.Join(", ", seats));
+            }
+
+            MelonLoader.MelonLogger.Msg("[CoreLib][CoopDiag] Building the seed banks - seeds picked per player (slot=plant):\n" + (lines.Count == 0 ? "  (none)" : string.Join("\n", lines)));
+        }
+        catch (Exception ex)
+        {
+            MelonLoader.MelonLogger.Warning($"[CoreLib][CoopDiag] Seed bank dump failed: {ex.Message}");
         }
     }
 }

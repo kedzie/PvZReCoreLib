@@ -5,6 +5,7 @@ using Il2CppUI.Scripts;
 using PvZReCoreLib.Util;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -110,9 +111,38 @@ public static class SeedChooserPaging
     // and leaves a controller with no "from" point - only a mouse click recovered it. So: remember
     // which visible cell (by position) had focus, and once the new page has settled put focus on
     // the cell at the same position. Only ever acts while the selection is actually lost.
+    //
+    // CO-OP: every player has their OWN MultiplayerEventSystem (ReloadedPlayerInput.EventSystem;
+    // InputNavigationManager._setSelectedObject calls SetSelectedGameObject once per player), and
+    // each one has its own currentSelectedGameObject. EventSystem.current is only ever ONE of them
+    // (outside of that system's own Update it is whichever registered first), so a restore that
+    // only looked at EventSystem.current - and re-selected through Selectable.Select(), which also
+    // goes through EventSystem.current - fixed player 1 and left player 2 with a destroyed
+    // selection: no "from" point, no navigation, "lost". The page itself is global (one grid, one
+    // currentPage), so one player turning the page rips the cell out from under the other. This
+    // therefore snapshots and restores EACH player's event system separately.
     private const int FocusRestoreTimeoutTicks = 180;
     private static int focusRestoreTicksLeft = 0;
-    private static int focusRestoreIndex = -1;
+
+    private sealed class FocusRestoreEntry
+    {
+        public UnityEngine.EventSystems.EventSystem System;
+        public string Label;
+
+        // Position (in visible-cell order) of the cell this event system had focused before the
+        // page turn, or -1 if it was not on a grid cell (arrow button, Let's Rock, nothing, ...).
+        public int Index = -1;
+
+        // True for EventSystem.current. Keeps the original single-player behaviour: if that
+        // selection gets lost it is restored (to cell 0 when it was not on a cell beforehand).
+        // Other event systems are only restored when they were on a grid cell, so a second, idle
+        // player slot never gets a phantom cursor in single-player.
+        public bool IsCurrent;
+
+        public bool Done;
+    }
+
+    private static readonly List<FocusRestoreEntry> focusRestoreEntries = new();
 
     private static List<Selectable> GetVisibleCells()
     {
@@ -141,27 +171,158 @@ public static class SeedChooserPaging
         return cells;
     }
 
-    // Call right BEFORE changing the page.
-    public static void BeginFocusRestore()
+    private static int IndexOfCell(List<Selectable> cells, GameObject focused)
     {
-        focusRestoreIndex = -1;
-        focusRestoreTicksLeft = FocusRestoreTimeoutTicks;
+        if (focused == null)
+        {
+            return -1;
+        }
 
-        var current = UnityEngine.EventSystems.EventSystem.current?.currentSelectedGameObject;
-        if (current == null)
+        for (int i = 0; i < cells.Count; i++)
+        {
+            if (focused == cells[i].gameObject || focused.transform.IsChildOf(cells[i].transform))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // EventSystem.current plus every MultiplayerEventSystem (one per player).
+    private static List<UnityEngine.EventSystems.EventSystem> CollectEventSystems()
+    {
+        var result = new List<UnityEngine.EventSystems.EventSystem>();
+
+        var current = UnityEngine.EventSystems.EventSystem.current;
+        if (current != null)
+        {
+            result.Add(current);
+        }
+
+        try
+        {
+            foreach (var multiplayer in UnityEngine.Object.FindObjectsOfType<MultiplayerEventSystem>())
+            {
+                if (multiplayer == null)
+                {
+                    continue;
+                }
+
+                bool duplicate = false;
+                foreach (var existing in result)
+                {
+                    if (existing.GetInstanceID() == multiplayer.GetInstanceID())
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate)
+                {
+                    result.Add(multiplayer);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MelonLoader.MelonLogger.Warning($"[CoreLib][CoopDiag] Could not enumerate the per-player event systems: {ex.Message}");
+        }
+
+        return result;
+    }
+
+    private static string DescribeEventSystem(UnityEngine.EventSystems.EventSystem es)
+    {
+        string root = "";
+        try
+        {
+            var multiplayer = es.TryCast<MultiplayerEventSystem>();
+            if (multiplayer != null && multiplayer.playerRoot != null)
+            {
+                root = $" playerRoot='{multiplayer.playerRoot.name}'";
+            }
+        }
+        catch
+        {
+        }
+
+        return $"'{es.gameObject.name}'#{es.GetInstanceID()}{root}";
+    }
+
+    private static string DescribeSelection(UnityEngine.EventSystems.EventSystem es, List<Selectable> cells)
+    {
+        var selected = es.currentSelectedGameObject;
+        if (selected == null)
+        {
+            return "selection=NONE";
+        }
+
+        int index = IndexOfCell(cells, selected);
+        return $"selection='{selected.name}' active={selected.activeInHierarchy} gridCellIndex={index}";
+    }
+
+    // [CoreLib][CoopDiag] one line per event system (= per player): where is each player's focus
+    // right now, in terms of the visible grid cells. Cheap; only called around page turns.
+    public static void LogCoopDiag(string reason)
+    {
+        try
+        {
+            var cells = GetVisibleCells();
+            var systems = CollectEventSystems();
+            var current = UnityEngine.EventSystems.EventSystem.current;
+            var lines = new List<string>();
+            foreach (var es in systems)
+            {
+                bool isCurrent = current != null && current.GetInstanceID() == es.GetInstanceID();
+                lines.Add($"  {DescribeEventSystem(es)}{(isCurrent ? " [EventSystem.current]" : "")}: {DescribeSelection(es, cells)}");
+            }
+
+            MelonLoader.MelonLogger.Msg($"[CoreLib][CoopDiag] {reason}: page {currentPage + 1}/{lastPageCount}, {cells.Count} visible cell(s), {systems.Count} event system(s):\n" + string.Join("\n", lines));
+        }
+        catch (Exception ex)
+        {
+            MelonLoader.MelonLogger.Warning($"[CoreLib][CoopDiag] {reason}: diagnostic failed: {ex.Message}");
+        }
+    }
+
+    private static int lastFocusSnapshotFrame = -1;
+
+    // Call right BEFORE changing the page. GoToNextPage/GoToPreviousPage also call this
+    // themselves (so an arrow-button click in co-op protects the OTHER player's focus too); the
+    // frame check makes the second call a no-op, so the shoulder-button path - which calls it
+    // first, with the single-player fallback enabled - is not overwritten.
+    //
+    // restoreCurrentWhenNotOnCell: legacy single-player behaviour for EventSystem.current - if its
+    // focus is lost after the turn, put it on cell 0 even if it was not on a cell before (it was
+    // already lost, or on a button). Only the LB/RB path wants that.
+    public static void BeginFocusRestore(bool restoreCurrentWhenNotOnCell = true)
+    {
+        if (lastFocusSnapshotFrame == Time.frameCount)
         {
             return;
         }
+        lastFocusSnapshotFrame = Time.frameCount;
+
+        focusRestoreEntries.Clear();
+        focusRestoreTicksLeft = FocusRestoreTimeoutTicks;
 
         var cells = GetVisibleCells();
-        for (int i = 0; i < cells.Count; i++)
+        var current = UnityEngine.EventSystems.EventSystem.current;
+
+        foreach (var es in CollectEventSystems())
         {
-            if (current == cells[i].gameObject || current.transform.IsChildOf(cells[i].transform))
+            focusRestoreEntries.Add(new FocusRestoreEntry
             {
-                focusRestoreIndex = i;
-                return;
-            }
+                System = es,
+                Label = DescribeEventSystem(es),
+                Index = IndexOfCell(cells, es.currentSelectedGameObject),
+                IsCurrent = restoreCurrentWhenNotOnCell && current != null && current.GetInstanceID() == es.GetInstanceID(),
+            });
         }
+
+        LogCoopDiag("Page turn requested (focus snapshot taken)");
     }
 
     private static void TickFocusRestore()
@@ -173,29 +334,66 @@ public static class SeedChooserPaging
 
         focusRestoreTicksLeft--;
 
-        var eventSystem = UnityEngine.EventSystems.EventSystem.current;
-        if (eventSystem == null)
+        List<Selectable> cells = null;
+        int pending = 0;
+
+        foreach (var entry in focusRestoreEntries)
         {
-            return;
+            if (entry.Done)
+            {
+                continue;
+            }
+
+            var es = entry.System;
+            if (es == null)
+            {
+                entry.Done = true;
+                continue;
+            }
+
+            if (entry.Index < 0 && !entry.IsCurrent)
+            {
+                // Was never on a grid cell - nothing of ours to put back.
+                entry.Done = true;
+                continue;
+            }
+
+            var selected = es.currentSelectedGameObject;
+            if (selected != null && selected.activeInHierarchy)
+            {
+                // Focus is somewhere valid (an arrow button, or the old cell not destroyed yet).
+                // Keep watching until the timeout rather than assuming it will stay that way.
+                pending++;
+                continue;
+            }
+
+            cells ??= GetVisibleCells();
+            if (cells.Count == 0 || cells.Count != GetExpectedCurrentPageCount())
+            {
+                // New page not settled yet.
+                pending++;
+                continue;
+            }
+
+            int index = Math.Clamp(entry.Index < 0 ? 0 : entry.Index, 0, cells.Count - 1);
+
+            // Per-event-system select: Selectable.Select() would go through EventSystem.current,
+            // i.e. always the same one player.
+            es.SetSelectedGameObject(cells[index].gameObject);
+            entry.Done = true;
+
+            MelonLoader.MelonLogger.Msg($"[CoreLib][CoopDiag] Restored focus of {entry.Label} to visible cell {index} (was cell {entry.Index} before the page turn).");
         }
 
-        var selected = eventSystem.currentSelectedGameObject;
-        if (selected != null && selected.activeInHierarchy)
+        if (pending == 0)
         {
-            // Focus is somewhere valid (e.g. an arrow button) - nothing to restore.
-            return;
+            focusRestoreTicksLeft = 0;
         }
-
-        var cells = GetVisibleCells();
-        if (cells.Count == 0 || cells.Count != GetExpectedCurrentPageCount())
+        else if (focusRestoreTicksLeft == 0)
         {
-            // New page not settled yet.
-            return;
+            // Timed out. Say who was still unresolved, so a "lost" player shows up in the log.
+            LogCoopDiag("Focus restore timed out");
         }
-
-        int index = Math.Clamp(focusRestoreIndex < 0 ? 0 : focusRestoreIndex, 0, cells.Count - 1);
-        cells[index].Select();
-        focusRestoreTicksLeft = 0;
     }
 
     // Called from CoreLibMod.OnUpdate() every frame, unconditionally (cheap no-op when nothing is
@@ -415,6 +613,7 @@ public static class SeedChooserPaging
             return;
         }
 
+        BeginFocusRestore(false);
         currentPage++;
         ApplyPaging(screen);
         // REVERTED: tried routing page turns through the full native rebuild (ForceRefresh)
@@ -450,6 +649,7 @@ public static class SeedChooserPaging
             return;
         }
 
+        BeginFocusRestore(false);
         currentPage--;
         ApplyPaging(screen);
         // REVERTED: tried routing page turns through the full native rebuild (ForceRefresh)
