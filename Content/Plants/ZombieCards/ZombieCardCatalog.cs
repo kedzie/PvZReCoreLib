@@ -80,6 +80,13 @@ public static class ZombieCardCatalog
                                                AlmanacArt = true, DefaultSunCost = 100, Placement = ZombieCardPlacement.Water, MinCol = 0, MaxCol = 7 } },
         { ZombieType.DolphinRider, new Entry { PseudoSeed = SeedType.None, DefaultName = "Dolphin Rider Zombie",
                                                AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.Water, MinCol = 1, MaxCol = 8 } },
+
+        // Yeti: no native packet either (almanac art, like the pool zombies). The native code needs no
+        // special handling for a hypnotized one: Zombie.UpdateYeti returns at once for a mind-controlled
+        // zombie (it never starts its YetiRunning retreat), and Zombie.IsWalkingBackwards - which is also
+        // how the Yeti retreats natively - is simply true for a mind-controlled zombie, so he walks right.
+        { ZombieType.Yeti,         new Entry { PseudoSeed = SeedType.None, DefaultName = "Yeti Zombie",
+                                               AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.Land } },
     };
 
     public static bool TryGet(ZombieType zombieType, out Entry entry)
