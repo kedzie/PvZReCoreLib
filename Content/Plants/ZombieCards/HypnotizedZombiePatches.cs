@@ -32,14 +32,19 @@ public class Zombie_CheckForBoardEdge_MindControlled_Patch
     }
 }
 
-// 2. Undo the leftwards landing shift for a hypnotized vaulter. The jump itself (velocity =
-// (zombieX - plantX - 80) / duration) already carries it across to the right of the plant; only the
-// final -150 is wrong, so it is simply put back. A normal per-tick move is a few pixels, so a drop
+// 2. Undo the leftwards landing shift for a hypnotized vaulter: the native update ends the vault with
+// mPosX -= 150 (shortly after a normal zombie has been carried across the plant), which is simply put
+// back by returning to the x the update started with. A normal per-tick move is a few pixels, so a drop
 // of more than 120 in one update can only be that shift.
+//
+// KNOWN ISSUE (not fixed yet): the hypnotized vaulter still hops the WRONG WAY. A game log showed its
+// jump velocity is computed from (zombieX - plantX - 80), which is negative for a zombie left of the
+// plant, and the native update moves a walking-backwards zombie by +mVelX - so it slides left the whole
+// jump (-1.09 per tick, 166 -> 0). Flipping mVelX's sign on the PreVault -> InVault tick should send it
+// right; not tried yet.
 [HarmonyPatch(typeof(Zombie), nameof(Zombie.UpdateZombiePolevaulter))]
 public class Zombie_UpdateZombiePolevaulter_MindControlled_Patch
 {
-    private const float LandingShift = 150f;
     private const float DetectDrop = 120f;
 
     public static void Prefix(Zombie __instance, out float __state)
@@ -54,9 +59,14 @@ public class Zombie_UpdateZombiePolevaulter_MindControlled_Patch
             return;
         }
 
-        if (__instance.mPosX - __state < -DetectDrop)
+        bool fix = __instance.mPosX - __state < -DetectDrop;
+        if (fix)
         {
-            __instance.mPosX += LandingShift;
+            // Back to where the update started (the jump already carried the zombie across), rather than
+            // adding the assumed 150 back: the dolphin's landing drop measured 94 instead of the native
+            // 70 in the game log, so the exact size of the native shift is not relied on.
+            __instance.mPosX = __state;
+            __instance.mX = __instance.mPosX;
         }
     }
 }
