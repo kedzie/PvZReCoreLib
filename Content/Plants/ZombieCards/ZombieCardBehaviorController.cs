@@ -32,7 +32,18 @@ public class ZombieCardBehaviorController : CustomPlantBehaviorController
         {
             if (PlantDefinition.TryCast<CustomZombieCardDefinition>() is { } card)
             {
-                ZombieCardUtils.SpawnHypnotizedZombie(Board, card.m_zombieType, Plant.mPlantCol, Plant.mRow, card.m_riseFromGround);
+                var leader = ZombieCardUtils.SpawnHypnotizedZombie(Board, card.m_spawnType, Plant.mPlantCol, Plant.mRow, card.m_riseFromGround);
+
+                // A horde card (the Flag Zombie): the leader brings a crowd and the huge wave banner.
+                if (leader != null && card.m_escortCount > 0)
+                {
+                    ZombieCardUtils.SpawnEscort(Board, card.m_escortType, card.m_escortCount, Plant.mPlantCol, Plant.mRow);
+                }
+
+                if (leader != null && card.m_announceHorde)
+                {
+                    ZombieCardUtils.ShowHordeAdvice(Board);
+                }
             }
         }
         catch (Exception e)

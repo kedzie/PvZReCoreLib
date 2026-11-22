@@ -551,6 +551,13 @@ public static class SeedChooserPaging
                 continue;
             }
 
+            // A water-only zombie card (Snorkel, Dolphin Rider, Ducky Tube) is pointless on a level
+            // without a pool, so it is dropped from that level's chooser the same way.
+            if (isRealCustom && ZombieCards.ZombieCardUtils.IsHiddenOnStage(cs.mSeedType, screen.mBoard))
+            {
+                continue;
+            }
+
             if (!isRealVanilla && !isRealCustom)
             {
                 continue; // reserved minigame-ID gap slot - doesn't consume a page slot at all

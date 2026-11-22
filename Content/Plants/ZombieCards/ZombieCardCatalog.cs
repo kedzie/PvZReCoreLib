@@ -13,8 +13,33 @@ public static class ZombieCardCatalog
 {
     public struct Entry
     {
+        // SeedType.None when the game has no native zombie packet for this zombie (Snorkel, Dolphin
+        // Rider, Ducky Tube). Such an entry must set AlmanacArt and DefaultSunCost: the card then
+        // takes its icon from the zombie's ALMANAC illustration and its cursor preview from the
+        // zombie's own ZombieDefinition instead.
         public SeedType PseudoSeed;
         public string DefaultName;
+
+        // The zombie the card actually spawns, when that is not the catalog key itself. Ducky Tube
+        // is the only case: ZombieType.DuckyTube is an almanac-only type (weight 0, same prefab as
+        // the Normal zombie, and not in Board.ZombieTypeCanGoInPool / Zombie.CheckForPool's list, so
+        // a real one placed in the pool would walk on top of the water without ever swimming). A
+        // "Ducky Tube Zombie" is just a Normal zombie standing in a pool lane, which the game turns
+        // into a swimmer on its own.
+        public ZombieType? SpawnType;
+
+        public bool AlmanacArt;
+        public int DefaultSunCost;
+
+        // Where the card may be planted by default (see ZombieCardPlacement). Registrations can
+        // override it.
+        public ZombieCardPlacement Placement;
+
+        // Water-only cards: the columns (0 = leftmost) the card may be planted in. The native
+        // hypnotized pool-exit rules (see HypnotizedPoolPatches) trip right away for a zombie that
+        // starts in the last water columns, which would only look like a glitch.
+        public int MinCol;
+        public int MaxCol;
     }
 
     // Mirrors Challenge.IZombieSeedTypeToZombieType (read from the decompile) in reverse. Only
@@ -40,6 +65,21 @@ public static class ZombieCardCatalog
         { ZombieType.Pogo,         new Entry { PseudoSeed = SeedType.ZombiePogo,         DefaultName = "Pogo Zombie" } },
         { ZombieType.Dancer,       new Entry { PseudoSeed = SeedType.ZombieDancer,       DefaultName = "Dancing Zombie" } },
         { ZombieType.Gargantuar,   new Entry { PseudoSeed = SeedType.ZombieGargantuar,   DefaultName = "Gargantuar" } },
+
+        // Pool zombies. The game has no I, Zombie / Versus packet for any of them, so the icon is the
+        // almanac illustration (a 262x262 square stone tile; the seed packet Image keeps the aspect
+        // ratio, so it shows letterboxed in the card) and the sun cost is picked here, in line with
+        // the cost of a comparable native zombie (Jack-in-the-Box 100, Polevaulter 75, Normal 50).
+        //   Ducky Tube: a Normal zombie, planted on water only.
+        //   Snorkel / Dolphin Rider: water only, and only in columns the native "hypnotized zombie
+        //   leaves the pool at the right edge" rules (Zombie.UpdateZombieSnorkel: x > 640,
+        //   UpdateZombieDolphinRider: x > 680) do not fire at once.
+        { ZombieType.DuckyTube,    new Entry { PseudoSeed = SeedType.None, DefaultName = "Ducky Tube Zombie", SpawnType = ZombieType.Normal,
+                                               AlmanacArt = true, DefaultSunCost = 50,  Placement = ZombieCardPlacement.Water, MinCol = 0, MaxCol = 8 } },
+        { ZombieType.Snorkel,      new Entry { PseudoSeed = SeedType.None, DefaultName = "Snorkel Zombie",
+                                               AlmanacArt = true, DefaultSunCost = 100, Placement = ZombieCardPlacement.Water, MinCol = 0, MaxCol = 7 } },
+        { ZombieType.DolphinRider, new Entry { PseudoSeed = SeedType.None, DefaultName = "Dolphin Rider Zombie",
+                                               AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.Water, MinCol = 1, MaxCol = 8 } },
     };
 
     public static bool TryGet(ZombieType zombieType, out Entry entry)

@@ -18,6 +18,24 @@ namespace PvZReCoreLib.Content.Plants.ZombieCards;
 // and fights the other zombies. No plant is left behind - the short-lived placeholder plant the
 // game creates is removed on its first update tick by ZombieCardBehaviorController.
 //
+// Where a zombie card may be planted.
+public enum ZombieCardPlacement
+{
+    // Land tiles only (the default): the placeholder plant is rejected on any pool tile
+    // (Board_CanPlantAt_RequiresGround_Patch).
+    Land = 0,
+
+    // Pool (water) tiles only: for the zombies that only exist in the pool lanes (Snorkel, Dolphin
+    // Rider, Ducky Tube). On a level without a pool the card is not offered in the seed chooser and
+    // cannot be placed ("can only be planted in the pool").
+    Water = 1,
+
+    // Land or water. Only meaningful for the zombies the game itself lets walk into the pool
+    // (Board.ZombieTypeCanGoInPool: Normal, Flag, Conehead, Buckethead): on a water tile the zombie
+    // becomes a Ducky Tube zombie by itself (Zombie.CheckForPool).
+    LandOrWater = 2,
+}
+
 // Data driven: one concrete class for every zombie, configured by Configure(...). Register through
 // ZombieCardRegistry.Register(ZombieType.TrafficCone) rather than newing this up by hand - that
 // also takes care of the registration order the free-SeedType lookup relies on.
@@ -26,7 +44,17 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
 {
     #region Variables
 
+    // The card's identity (the catalog key: which almanac art / default name it uses).
     public ZombieType m_zombieType = ZombieType.Normal;
+
+    // The zombie type actually created. Same as m_zombieType except for the Ducky Tube card, which
+    // spawns a Normal zombie (see ZombieCardCatalog.Entry.SpawnType).
+    public ZombieType m_spawnType = ZombieType.Normal;
+
+    // Where the card can be planted, and for a Water card which columns (inclusive).
+    public ZombieCardPlacement m_placement = ZombieCardPlacement.Land;
+    public int m_minCol = 0;
+    public int m_maxCol = 8;
 
     // Versus: the PLANT-side player can pick and plant the card; the zombie it conjures is hypnotized
     // and fights the zombie side's zombies. (The zombie side has its own chooser list,
@@ -40,6 +68,13 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
     // graveyard/Versus spawn path) instead of appearing already standing. Unverified in game.
     public bool m_riseFromGround = false;
 
+    // A horde card: besides its own zombie, the card conjures m_escortCount hypnotized zombies of
+    // m_escortType behind it (spread over the lanes next to it) and, with m_announceHorde, flashes the
+    // "huge wave" banner. Used by the Flag Zombie card ("a flag zombie leads a wave").
+    public int m_escortCount = 0;
+    public ZombieType m_escortType = ZombieType.Normal;
+    public bool m_announceHorde = false;
+
     #endregion
 
     public CustomZombieCardDefinition(IntPtr pointer) : base(pointer)
@@ -49,9 +84,10 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         m_subClass = PlantSubClass.Normal;
         m_entryStatus = ReloadedEntryStatus.Ready;
 
-        // The card must never end up on a pool tile: the placeholder plant is only there for a tick,
-        // but the zombie it spawns is a land walker. Reuses the existing ground-only rejection in
-        // Board_CanPlantAt_RequiresGround_Patch.
+        // By default the card must never end up on a pool tile: the placeholder plant is only there
+        // for a tick, but the zombie it spawns is a land walker. Reuses the existing ground-only
+        // rejection in Board_CanPlantAt_RequiresGround_Patch. Configure() turns this off again for
+        // a card whose placement allows water (ZombieCardUtils.AdjustPlanting then does the checks).
         m_requiresGround = true;
 
         // Never matters (the placeholder dies on its first tick) but keep it sane if something
@@ -111,7 +147,9 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
     // Must run before CustomContentRegistry.RegisterCustomPlant: registration snapshots the sun
     // cost / recharge / images into the Versus fields and the almanac entry.
     public void Configure(ZombieType zombieType, string name = null, string description = null, string tooltip = null,
-        int? sunCost = null, int? rechargeTime = null, bool allowInVersus = true, bool riseFromGround = false)
+        int? sunCost = null, int? rechargeTime = null, bool allowInVersus = true, bool riseFromGround = false,
+        ZombieCardPlacement? placement = null, int escortCount = 0, ZombieType escortType = ZombieType.Normal,
+        bool announceHorde = false)
     {
         if (!ZombieCardCatalog.TryGet(zombieType, out var entry))
         {
@@ -119,18 +157,40 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         }
 
         m_zombieType = zombieType;
+        m_spawnType = entry.SpawnType ?? zombieType;
         m_allowInVersus = allowInVersus;
         m_riseFromGround = riseFromGround;
+        m_escortCount = escortCount;
+        m_escortType = escortType;
+        m_announceHorde = announceHorde;
+
+        m_placement = placement ?? entry.Placement;
+        m_minCol = entry.MinCol;
+        m_maxCol = entry.MaxCol > 0 ? entry.MaxCol : 8;
+
+        // A card that may stand on water must not be turned away by the ground-only rejection; the
+        // water rules are applied by ZombieCardUtils.AdjustPlanting instead.
+        m_requiresGround = m_placement == ZombieCardPlacement.Land;
 
         string displayName = name ?? entry.DefaultName;
+        string where = m_placement switch
+        {
+            ZombieCardPlacement.Water => "an empty pool square",
+            ZombieCardPlacement.LandOrWater => "an empty lawn or pool square",
+            _ => "an empty lawn square",
+        };
         SetName(displayName, false);
         SetTooltip(tooltip ?? $"Plants a hypnotized {displayName} that fights for you.", false);
-        SetDescription(description ?? $"Not a plant at all. Plant this card on an empty lawn square and a {displayName} appears there already hypnotized. It walks to the right and attacks the zombies it meets, exactly like a zombie that has eaten a Hypno-shroom.", false);
+        SetDescription(description ?? $"Not a plant at all. Plant this card on {where} and a {displayName} appears there already hypnotized. It walks to the right and attacks the zombies it meets, exactly like a zombie that has eaten a Hypno-shroom.", false);
 
-        // Native zombie seed (I, Zombie / Versus) definition: source of the sun cost and all the art.
-        PlantDefinition source = ReloadedUtils.GetPlantDefinition(entry.PseudoSeed);
+        // Native zombie seed (I, Zombie / Versus) definition: source of the sun cost and the art.
+        // The pool zombies have none (entry.PseudoSeed == None): their art comes from the almanac
+        // (below) and Normal's definition stands in for the cursor-preview scale.
+        PlantDefinition source = entry.PseudoSeed != SeedType.None
+            ? ReloadedUtils.GetPlantDefinition(entry.PseudoSeed)
+            : ReloadedUtils.GetPlantDefinition(SeedType.ZombieNormal);
 
-        m_seedCost = sunCost ?? source.m_seedCost;
+        m_seedCost = sunCost ?? (entry.PseudoSeed != SeedType.None ? source.m_seedCost : entry.DefaultSunCost);
         m_refreshTime = rechargeTime ?? DefaultRechargeTime;
 
         // Versus reads its own fields (confirmed in the decompile: Plant.GetCost reads +0x4C
@@ -150,7 +210,45 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         m_previewSpriteOffset = source.m_previewSpriteOffset;
         m_previewSpriteScale = source.m_previewSpriteScale;
 
+        if (entry.AlmanacArt)
+        {
+            ConfigureAlmanacSeedPacketArt(zombieType);
+        }
+
         ConfigureAlmanacArt(zombieType);
+    }
+
+    // The card icon of a zombie without a native seed packet: the zombie's almanac illustration
+    // (AlmanacEntryData.m_entryThumbnail, e.g. SPR_Almanac_Zombies_SnorkelZombie, in the almanac
+    // icon atlas) for both the Adventure and the Versus packet, and the cursor preview sprite of the
+    // zombie's own ZombieDefinition (SPR_Preview_Zombie_snorkle ...). If either lookup fails the
+    // Normal zombie's packet art Configure() already put in place is kept, so the card still works.
+    private void ConfigureAlmanacSeedPacketArt(ZombieType zombieType)
+    {
+        try
+        {
+            var dataService = AppCore.GetService<IDataService>().Cast<DataService>();
+            foreach (var candidate in ReadAll(dataService.ZombieAlmanacData))
+            {
+                if (candidate.m_zombieType == zombieType && candidate.m_entryThumbnail != null)
+                {
+                    m_plantImage = AssetRefUtil.CloneSprite(candidate.m_entryThumbnail);
+                    m_versusImage = AssetRefUtil.CloneSprite(candidate.m_entryThumbnail);
+                    break;
+                }
+            }
+
+            var zombieDefinition = ReloadedUtils.GetZombieDefinition(zombieType);
+            if (zombieDefinition != null && zombieDefinition.PreviewSprite != null)
+            {
+                m_previewSprite = AssetRefUtil.CloneSprite(zombieDefinition.PreviewSprite);
+                m_previewSpriteOffset = zombieDefinition.PreviewSpriteOffset;
+            }
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Zombie card almanac seed packet art lookup failed for {zombieType}, keeping the Normal zombie packet: {e.Message}");
+        }
     }
 
     // 30 seconds (game time units are hundredths of a second: Peashooter 750 = 7.5 s, Hypno-shroom
@@ -215,10 +313,13 @@ public static class ZombieCardRegistry
     // lowest free SeedType from what is already registered, so two cards must not be created before
     // the first one is registered.
     public static CustomZombieCardDefinition Register(ZombieType zombieType, string name = null, string description = null,
-        string tooltip = null, int? sunCost = null, int? rechargeTime = null, bool allowInVersus = true, bool riseFromGround = false)
+        string tooltip = null, int? sunCost = null, int? rechargeTime = null, bool allowInVersus = true, bool riseFromGround = false,
+        ZombieCardPlacement? placement = null, int escortCount = 0, ZombieType escortType = ZombieType.Normal,
+        bool announceHorde = false)
     {
         var definition = ScriptableObject.CreateInstance<CustomZombieCardDefinition>();
-        definition.Configure(zombieType, name, description, tooltip, sunCost, rechargeTime, allowInVersus, riseFromGround);
+        definition.Configure(zombieType, name, description, tooltip, sunCost, rechargeTime, allowInVersus, riseFromGround, placement,
+            escortCount, escortType, announceHorde);
         CustomContentRegistry.RegisterCustomPlant(definition);
         return definition;
     }
