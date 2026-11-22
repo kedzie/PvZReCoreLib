@@ -104,10 +104,106 @@ public static class SeedChooserPaging
         pendingRewireLastCount = -1;
     }
 
+    // Controller focus across a page turn made WITHOUT the on-screen arrows (LB/RB, see
+    // SeedChooserShoulderPagingPatches.cs). The arrow buttons keep focus themselves, but the
+    // focused grid cell is destroyed by the page turn, which collapses Unity's selection to null
+    // and leaves a controller with no "from" point - only a mouse click recovered it. So: remember
+    // which visible cell (by position) had focus, and once the new page has settled put focus on
+    // the cell at the same position. Only ever acts while the selection is actually lost.
+    private const int FocusRestoreTimeoutTicks = 180;
+    private static int focusRestoreTicksLeft = 0;
+    private static int focusRestoreIndex = -1;
+
+    private static List<Selectable> GetVisibleCells()
+    {
+        var cells = new List<Selectable>();
+        var grid = CachedGrid;
+        if (grid == null)
+        {
+            return cells;
+        }
+
+        for (int i = 0; i < grid.childCount; i++)
+        {
+            var child = grid.GetChild(i);
+            if (!child.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            var selectable = child.GetComponentInChildren<Selectable>();
+            if (selectable != null)
+            {
+                cells.Add(selectable);
+            }
+        }
+
+        return cells;
+    }
+
+    // Call right BEFORE changing the page.
+    public static void BeginFocusRestore()
+    {
+        focusRestoreIndex = -1;
+        focusRestoreTicksLeft = FocusRestoreTimeoutTicks;
+
+        var current = UnityEngine.EventSystems.EventSystem.current?.currentSelectedGameObject;
+        if (current == null)
+        {
+            return;
+        }
+
+        var cells = GetVisibleCells();
+        for (int i = 0; i < cells.Count; i++)
+        {
+            if (current == cells[i].gameObject || current.transform.IsChildOf(cells[i].transform))
+            {
+                focusRestoreIndex = i;
+                return;
+            }
+        }
+    }
+
+    private static void TickFocusRestore()
+    {
+        if (focusRestoreTicksLeft <= 0)
+        {
+            return;
+        }
+
+        focusRestoreTicksLeft--;
+
+        var eventSystem = UnityEngine.EventSystems.EventSystem.current;
+        if (eventSystem == null)
+        {
+            return;
+        }
+
+        var selected = eventSystem.currentSelectedGameObject;
+        if (selected != null && selected.activeInHierarchy)
+        {
+            // Focus is somewhere valid (e.g. an arrow button) - nothing to restore.
+            return;
+        }
+
+        var cells = GetVisibleCells();
+        if (cells.Count == 0 || cells.Count != GetExpectedCurrentPageCount())
+        {
+            // New page not settled yet.
+            return;
+        }
+
+        int index = Math.Clamp(focusRestoreIndex < 0 ? 0 : focusRestoreIndex, 0, cells.Count - 1);
+        cells[index].Select();
+        focusRestoreTicksLeft = 0;
+    }
+
     // Called from CoreLibMod.OnUpdate() every frame, unconditionally (cheap no-op when nothing is
     // pending).
     public static void TickDeferredRewire()
     {
+        TickFocusRestore();
+
         if (!pendingRewirePolling)
         {
             return;
@@ -248,6 +344,15 @@ public static class SeedChooserPaging
                 }
             }
             bool isRealCustom = CustomContentRegistry.IsValidCustomPlantType(cs.mSeedType);
+
+            // Zombie cards are offered in Versus by default. Only a card that explicitly opted out
+            // (CustomZombieCardDefinition.m_allowInVersus = false) is dropped from the Versus chooser,
+            // the same way the banned upgrade plants are above: no page slot, never made visible.
+            if (IsVersusScreen && isRealCustom && ZombieCards.ZombieCardUtils.IsBlockedInVersus(cs.mSeedType))
+            {
+                continue;
+            }
+
             if (!isRealVanilla && !isRealCustom)
             {
                 continue; // reserved minigame-ID gap slot - doesn't consume a page slot at all
