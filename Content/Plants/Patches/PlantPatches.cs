@@ -234,8 +234,10 @@ public class Zombie_CanTargetPlant_Patch
     // (e.g. Spikeweed's SpikeweedBehaviorController) since "true" here means
     // "don't override," not a definitive answer that could clash with
     // native behavior.
-    public static bool Prefix(Zombie __instance, Plant thePlant, ZombieAttackType theAttackType, ref bool __result)
+    public static bool Prefix(Zombie __instance, Plant thePlant, ZombieAttackType theAttackType, ref bool __result, out SeedType __state)
     {
+        __state = SeedType.None;
+
         if (thePlant == null || thePlant.mController == null || thePlant.mController.gameObject == null)
         {
             return true;
@@ -248,11 +250,30 @@ public class Zombie_CanTargetPlant_Patch
 
         if (comp.CanBeTargetedBy(theAttackType))
         {
+            // A custom nut is judged as a Wall-nut by native (ladder placement and the "can't chew a
+            // nut before it has a ladder" rule key on the literal seed type). Native reads
+            // mSeedType and nothing else for that, so lend it the Wall-nut type for the duration of
+            // this one call and put the real one back in the Postfix.
+            if (CustomContentRegistry.IsValidCustomPlantType(thePlant.mSeedType)
+                && CustomContentRegistry.GetCustomPlantDefinition(thePlant.mSeedType)?.TryCast<CustomPlantDefinition>() is { m_countsAsNut: true })
+            {
+                __state = thePlant.mSeedType;
+                thePlant.mSeedType = SeedType.Wallnut;
+            }
+
             return true;
         }
 
         __result = false;
         return false;
+    }
+
+    public static void Postfix(Plant thePlant, SeedType __state)
+    {
+        if (__state != SeedType.None && thePlant != null)
+        {
+            thePlant.mSeedType = __state;
+        }
     }
 }
 

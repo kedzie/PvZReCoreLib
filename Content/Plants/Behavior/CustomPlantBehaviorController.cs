@@ -31,6 +31,16 @@ public class CustomPlantBehaviorController : CustomBehaviorController
     
     private float launchCounterCache;
 
+    // Stackable plants (CustomPlantDefinition.m_maxStack > 1), see PlantStacking.cs.
+    // bStackChecked: this plant's first update tick has run the "am I a duplicate planting that
+    // must merge into the plant already on this tile" check. maxStackCache: m_maxStack, looked up
+    // lazily (0 = not looked up yet).
+    public bool bStackChecked = false;
+    // Set on a duplicate planting that merged into the plant already on its tile (and removed
+    // itself): its remaining update hooks for that tick are skipped.
+    public bool bMergedAway = false;
+    private int maxStackCache = 0;
+
     #endregion
     
     public CustomPlantBehaviorController(IntPtr pointer) : base(pointer)
@@ -47,6 +57,47 @@ public class CustomPlantBehaviorController : CustomBehaviorController
         return plantComp;
     }
     
+    // 1..m_maxStack: how many plantings this plant is made of (Peapod: its number of heads).
+    // Always 1 for a plant that is not stackable. The value lives in the native Plant (mTargetX,
+    // see PlantStacking) so it is saved with the board and survives a save/load.
+    public int StackCount => PlantStacking.GetStackCount(Plant, MaxStack);
+
+    public int MaxStack
+    {
+        get
+        {
+            if (maxStackCache <= 0)
+            {
+                maxStackCache = PlantDefinition != null && PlantDefinition.TryCast<CustomPlantDefinition>() is { } def
+                    ? Math.Max(1, def.m_maxStack)
+                    : 1;
+            }
+
+            return maxStackCache;
+        }
+    }
+
+    // Called on the plant that stays, right after another planting of the same seed type was
+    // merged into it (newCount = the new StackCount, 2..m_maxStack). The merged-in planting has
+    // already been removed. Default is a no-op; switch the visuals/behaviour here or poll
+    // StackCount.
+    public virtual void OnStackedOn(int newCount)
+    {
+    }
+
+    // True once the plant's skin (the sprite/Animator the custom animations run on) has been
+    // applied. PlayAnimation requests made before that are silently dropped by the skin hook, so
+    // a controller that wants a non-default clip from the start (e.g. a plant restored from a
+    // save) should wait for this.
+    public bool IsSkinApplied
+    {
+        get
+        {
+            var go = Plant?.mController?.gameObject;
+            return go != null && PlantExtension.GetOrCreateExtension<PlantExtension>(go).CurrentSkin != null;
+        }
+    }
+
     #region Plant Calls
     
     public Action PreUpdateEvent;
@@ -167,6 +218,9 @@ public class CustomPlantBehaviorController : CustomBehaviorController
 
         bMintEffectActive = false;
         bLaunchCounterFiredThisFrame = false;
+        bStackChecked = false;
+        bMergedAway = false;
+        maxStackCache = 0;
     }
 
     #endregion
@@ -317,6 +371,17 @@ public class Plant_PlantUpdate_Patch
         
         if(__instance.mController.gameObject.TryGetComponent(out CustomPlantBehaviorController customPlantBehavior))
         {
+            // First tick of a stackable plant: a duplicate planting on an occupied tile merges
+            // into the plant that is already there and removes itself (never runs as a plant).
+            if (!customPlantBehavior.bStackChecked)
+            {
+                customPlantBehavior.bStackChecked = true;
+                if (PlantStacking.TryMergeIntoExisting(customPlantBehavior))
+                {
+                    return false;
+                }
+            }
+
             return customPlantBehavior.PrePlantUpdate();
         }
 
@@ -332,6 +397,11 @@ public class Plant_PlantUpdate_Patch
         
         if(__instance.mController.gameObject.TryGetComponent(out CustomPlantBehaviorController customPlantBehavior))
         {
+            if (customPlantBehavior.bMergedAway)
+            {
+                return;
+            }
+
             customPlantBehavior.PostPlantUpdate();
         }
     }

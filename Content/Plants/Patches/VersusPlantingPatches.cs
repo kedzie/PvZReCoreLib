@@ -42,6 +42,14 @@ public class Board_MouseDownWithPlant_VersusCustomSeed_Patch
             return true;
         }
 
+        // Only a zombie card that opted out of Versus (m_allowInVersus = false, default is allowed)
+        // is refused here; every other custom seed, zombie cards included, goes through the same
+        // flipped-mode planting path below.
+        if (ZombieCards.ZombieCardUtils.IsBlockedInVersus(seedType))
+        {
+            return false;
+        }
+
         var levelData = app.LevelData;
         if (levelData == null)
         {

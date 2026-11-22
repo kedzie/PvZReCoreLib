@@ -32,9 +32,27 @@ public class CustomPlantDefinition : PlantDefinition
     // Board_CanPlantAt_RequiresGround_Patch in PlantPatches.cs).
     public bool m_requiresGround = false;
 
+    // Stackable plant (PvZ2 "CanPlantAgainToUpgrade", e.g. Peapod): how many times this plant may
+    // be planted on the SAME tile, each planting merging into the existing plant instead of
+    // being a second plant. 1 = not stackable (default). See PlantStacking.cs for the mechanism;
+    // the controller reads the current count from CustomPlantBehaviorController.StackCount and is
+    // told about each merge through OnStackedOn.
+    public int m_maxStack = 1;
+
+    // A nut (Wall-nut, Tall-nut and the like): zombies that need a nut to act on - the Ladder
+    // Zombie places its ladder on one - treat this plant as a Wall-nut for that. The game keys
+    // that on the literal seed types Wallnut/Tallnut/Pumpkinshell, so a custom nut would otherwise
+    // be chewed through instead of climbed. See Zombie_CanTargetPlant_Patch (PlantPatches.cs).
+    public bool m_countsAsNut = false;
+
     public string m_description = "";
 
     public AssetReferenceSprite m_almanacBackground;
+
+    // Optional: the almanac illustration, when it should be something other than the seed packet
+    // image (which is what every plant used before this existed). Null = use the seed packet image.
+    // Zombie cards point this at the game's own zombie almanac art.
+    public AssetReferenceSprite m_almanacThumbnail;
 
     #endregion
     
@@ -172,10 +190,13 @@ public class CustomAlmanacEntryData : AlmanacEntryData
         
         m_entrySunCost = plantDef.m_seedCost;
 
-        m_entryPortrait = PersistentStorage.Store(new AssetReferenceSprite(plantDef.m_plantImage.m_AssetGUID));
+        // AssetRefUtil.CloneSprite == new AssetReferenceSprite(guid) plus the sub-object name, which
+        // is empty for every bundle sprite (so unchanged for them) but required for the game's own
+        // atlas sprites (zombie cards).
+        m_entryPortrait = AssetRefUtil.CloneSprite(plantDef.m_plantImage);
         
-        m_entryThumbnail = PersistentStorage.Store(new AssetReferenceSprite(plantDef.m_plantImage.m_AssetGUID));
-        m_entryThumbnailBackground = PersistentStorage.Store(new AssetReferenceSprite(plantDef.m_almanacBackground.m_AssetGUID));
+        m_entryThumbnail = AssetRefUtil.CloneSprite(plantDef.m_almanacThumbnail ?? plantDef.m_plantImage);
+        m_entryThumbnailBackground = AssetRefUtil.CloneSprite(plantDef.m_almanacBackground);
 
         m_entryType = AlmanacEntryType.Plant;
         m_seedType = plantDef.m_seedType;
