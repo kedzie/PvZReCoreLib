@@ -30,6 +30,16 @@ public class CustomProjectileDefinition : ProjectileDefinition
     
     public AudioClip m_hitSfx = null;
 
+    // On the roof's slanted half the ground rises under a straight-flying projectile, and the
+    // game crashes native peas into it (see CustomProjectileBehaviorController.CheckRoofCrash).
+    // Native only does that for its own projectile types, so custom ones need this. Lobbed and
+    // FloatOver motion already follow the slope natively and are never affected.
+    public bool m_crashesIntoRoofSlope = true;
+
+    // Native pea rule: impact once the ground line (mShadowY) is within this many px of the
+    // projectile (mShadowY - mPosY < 28).
+    public float m_roofContactGap = 28f;
+
     public string m_defaultSkin = "";
 
     #endregion
@@ -131,6 +141,73 @@ public class CustomProjectileBehaviorController : CustomBehaviorController
 
     #region Methods
 
+    #region Roof slope
+
+    private bool roofBaselineCaptured;
+    private float roofStartShadowY;
+    private float roofAllowedRise;
+
+    // Called when the ground rises into this projectile on the roof. Default is just to remove it
+    // (not DoImpact(null): subclasses' PreDoImpact expect a zombie). Override for an effect.
+    public virtual void OnRoofCrash() { }
+
+    public override void Reset()
+    {
+        base.Reset();
+        roofBaselineCaptured = false;
+    }
+
+    // Just before the first native Update, i.e. after the plant has applied its own spawn offsets.
+    public void CaptureRoofBaseline()
+    {
+        if (roofBaselineCaptured)
+        {
+            return;
+        }
+        roofBaselineCaptured = true;
+
+        var customDef = ProjectileDefinition?.TryCast<CustomProjectileDefinition>();
+        if (customDef == null || !customDef.m_crashesIntoRoofSlope)
+        {
+            roofAllowedRise = float.PositiveInfinity;
+            return;
+        }
+
+        // Native crashes a pea when (mShadowY - mPosY) drops below the contact gap. Slope only
+        // moves mShadowY, so that is the same as the ground rising by (initial gap - contact gap).
+        // Clamped so a projectile spawned lower than the gap (e.g. a ground roller) crashes as
+        // soon as the ground rises at all, instead of dying on flat ground.
+        roofStartShadowY = Projectile.mShadowY;
+        roofAllowedRise = Mathf.Max(Projectile.mShadowY - Projectile.mPosY - customDef.m_roofContactGap, 0f);
+    }
+
+    public void CheckRoofCrash()
+    {
+        if (!roofBaselineCaptured || Projectile.mDead)
+        {
+            return;
+        }
+
+        var motion = Projectile.mMotionType;
+        if (motion == ProjectileMotion.Lobbed || motion == ProjectileMotion.FloatOver)
+        {
+            return;
+        }
+
+        if (Projectile.mBoard == null || !Projectile.mBoard.StageHasRoof())
+        {
+            return;
+        }
+
+        if (roofStartShadowY - Projectile.mShadowY > roofAllowedRise + 0.01f)
+        {
+            OnRoofCrash();
+            Projectile.Die();
+        }
+    }
+
+    #endregion
+
     public Action PreUpdateEvent;
     public virtual bool PreUpdate() { PreUpdateEvent?.Invoke(); return true; }
     public Action PostUpdateEvent;
@@ -209,6 +286,7 @@ public class Projectile_Update_Patch
 
         if(__instance.mController.gameObject.TryGetComponent(out CustomProjectileBehaviorController customProjectileBehavior))
         {
+            customProjectileBehavior.CaptureRoofBaseline();
             return customProjectileBehavior.PreUpdate();
         }
 
@@ -225,6 +303,7 @@ public class Projectile_Update_Patch
         if(__instance.mController.gameObject.TryGetComponent(out CustomProjectileBehaviorController customProjectileBehavior))
         {
             customProjectileBehavior.PostUpdate();
+            customProjectileBehavior.CheckRoofCrash();
         }
     }
 }
