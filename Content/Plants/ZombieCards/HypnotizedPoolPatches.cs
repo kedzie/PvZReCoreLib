@@ -74,7 +74,11 @@ public class Zombie_UpdateZombieDolphinRider_MindControlled_Patch
         // assumed amount: the mirror image of the native -70, from the post-jump x.
         if (__state.Phase == ZombiePhase.DolphinInJump && phase == ZombiePhase.DolphinWalkingInPool)
         {
-            __instance.mPosX = __state.PosX + LandingShift;
+            // The jump animation carries the sprite as far as the native landing shift takes mPosX back
+            // (the shift is what the animation offset becomes when it resets), so the mirror image of the
+            // measured shift keeps the zombie exactly where the animation left it: no teleport.
+            float moved = __instance.mPosX - __state.PosX;
+            __instance.mPosX = __state.PosX - moved;
             __instance.mX = __instance.mPosX;
             return;
         }
@@ -130,7 +134,19 @@ public class Board_CanPlantAt_ZombieCardPlacement_Patch
     public static void Postfix(Board __instance, int theGridX, int theGridY, SeedType theType, ref PlantingReason __result)
     {
         var card = ZombieCardUtils.GetCard(theType);
-        if (card == null || card.m_placement == ZombieCardPlacement.Land)
+        if (card == null)
+        {
+            return;
+        }
+
+        // Zomboni / Bobsled Team: they drive the whole lane, so not into a lane with water in it.
+        if (card.m_avoidPoolRows && __result == PlantingReason.Ok && ZombieCardUtils.RowHasPool(__instance, theGridY))
+        {
+            __result = PlantingReason.NotHere;
+            return;
+        }
+
+        if (card.m_placement == ZombieCardPlacement.Land)
         {
             return;
         }

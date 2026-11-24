@@ -9,63 +9,122 @@ namespace PvZReCoreLib.Content.Plants.ZombieCards;
 //
 //  1. Board edge: Zombie.CheckForBoardEdge has no mind-control exemption for the LEFT edge, so a
 //     hypnotized zombie that ends up past the house line (a vault landing, a push-back, a dancer's
-//     walk-in) is treated as an enemy reaching the house and loses the game.
+//     walk-in) is treated as an enemy reaching the house: it loses the game or sets a mower off.
 //  2. Pole vault landing: when the vault animation loops, UpdateZombiePolevaulter does
 //     mPosX -= 150 (constant read from GameAssembly.dll) to put the zombie past the plant on its
 //     left. A hypnotized vaulter is flying right, so that moved it two tiles back across the screen.
 //  3. Dancer walk-in: a hypnotized Dancing Zombie (and its backup dancers, which inherit the flag
 //     in SummonBackupDancer) takes its DancingIn steps to the left.
 
-// 1. Never let a hypnotized zombie trip the left-edge loss check.
+// 1. A hypnotized zombie never takes part in the house / lawn mower logic of the board edge.
+//    Zombie.CheckForBoardEdge: for a zombie that IsWalkingBackwards (always true when mind-controlled)
+//    it first removes it silently when mPosX > 850 (DieNoLoot - this is how a hypnotized zombie leaves at
+//    the right), but when mPosX <= 850 it does NOT return: it falls through to the same left-edge code
+//    as an enemy - mX <= the type's left threshold (about -46 .. -53 px) -> Board.FindLawnMowerInRow ->
+//    LawnMower.StartMower, or Zombie.WalkIntoHouse (a lost game). So a hypnotized zombie that ends up
+//    past the house line (a vault landing, a push-back, a dancer's walk-in, a Zomboni launched from the
+//    left edge) set mowers off. For a mind-controlled zombie the native method now only runs while it
+//    is past the right limit (the removal), and the left-edge logic is skipped altogether.
 [HarmonyPatch(typeof(Zombie), nameof(Zombie.CheckForBoardEdge))]
 public class Zombie_CheckForBoardEdge_MindControlled_Patch
 {
-    // The loss line is a little left of x = 0 (about -35..-62 depending on the zombie type).
-    private const float MinPosX = 0f;
+    // Read from GameAssembly.dll: the right-hand removal limit in CheckForBoardEdge.
+    private const float RightRemovalX = 850f;
 
-    public static void Prefix(Zombie __instance)
+    public static bool Prefix(Zombie __instance)
     {
-        if (__instance != null && __instance.mMindControlled && __instance.mPosX < MinPosX)
+        if (__instance == null || !__instance.mMindControlled)
         {
-            __instance.mPosX = MinPosX;
+            return true;
         }
+
+        // Keep it on the board (the clamp the old patch did).
+        if (__instance.mPosX < 0f)
+        {
+            __instance.mPosX = 0f;
+        }
+
+        return __instance.mPosX > RightRemovalX;
     }
 }
 
-// 2. Undo the leftwards landing shift for a hypnotized vaulter: the native update ends the vault with
-// mPosX -= 150 (shortly after a normal zombie has been carried across the plant), which is simply put
-// back by returning to the x the update started with. A normal per-tick move is a few pixels, so a drop
-// of more than 120 in one update can only be that shift.
-//
-// KNOWN ISSUE (not fixed yet): the hypnotized vaulter still hops the WRONG WAY. A game log showed its
-// jump velocity is computed from (zombieX - plantX - 80), which is negative for a zombie left of the
-// plant, and the native update moves a walking-backwards zombie by +mVelX - so it slides left the whole
-// jump (-1.09 per tick, 166 -> 0). Flipping mVelX's sign on the PreVault -> InVault tick should send it
-// right; not tried yet.
+// 2. Hypnotized vaulter. The native vault moves the sprite with TWO things: mPosX (by mVelX each tick)
+// and the "anim_jump" animation itself, whose sprite travels a further ~150 px in the walking direction
+// (for a left-walking zombie: leftwards). When the animation ends the game does mPosX -= 150 and the
+// animation offset resets, so nothing jumps: the 150 just moves from the animation into mPosX. For a
+// zombie walking right (mirrored) three things are wrong, found from game logs and from watching it:
+//  a) The velocity is computed on the PreVault -> InVault tick as (zombieX - plantX - 80) / T, negative
+//     for a zombie left of the plant, and a mind-controlled zombie moves by +mVelX, so it slid LEFT the
+//     whole jump. The distance is also the wrong one: natively mPosX only has to cover the plant distance
+//     minus the 150 the animation carries. For the mirrored jump mPosX must cover (d - 80), with
+//     d = plantX - zombieX (the native magnitude is (d + 80)), and the sign is the other way. So the
+//     velocity is rescaled by (d - 80) / (d + 80) (positive = right; may be slightly negative when the
+//     plant is very close, which is fine: the animation carries the zombie).
+//  b) At the end the native mPosX -= 150 is the wrong direction. The mirror image (+150) is what keeps the
+//     zombie where the animation put it, so the shift is reversed instead of undone: no teleport.
+//  c) (unchanged) it jumps over PLANTS (native FindPlantTarget), i.e. over our own plants; vaulting over
+//     enemy zombies instead is a design decision, not done.
 [HarmonyPatch(typeof(Zombie), nameof(Zombie.UpdateZombiePolevaulter))]
 public class Zombie_UpdateZombiePolevaulter_MindControlled_Patch
 {
     private const float DetectDrop = 120f;
 
-    public static void Prefix(Zombie __instance, out float __state)
+    // Native: velX = (zombieX - plantX - 80) / T, so |native distance| = d + 80.
+    private const float PlantOffset = 80f;
+
+    public struct VaultState
     {
-        __state = __instance != null ? __instance.mPosX : 0f;
+        public float PosX;
+        public ZombiePhase Phase;
     }
 
-    public static void Postfix(Zombie __instance, float __state)
+    public static void Prefix(Zombie __instance, out VaultState __state)
+    {
+        __state = default;
+        if (__instance != null)
+        {
+            __state.PosX = __instance.mPosX;
+            __state.Phase = __instance.mZombiePhase;
+        }
+    }
+
+    public static void Postfix(Zombie __instance, VaultState __state)
     {
         if (__instance == null || !__instance.mMindControlled)
         {
             return;
         }
 
-        bool fix = __instance.mPosX - __state < -DetectDrop;
-        if (fix)
+        if (__state.Phase == ZombiePhase.PolevaulterPreVault && __instance.mZombiePhase == ZombiePhase.PolevaulterInVault)
         {
-            // Back to where the update started (the jump already carried the zombie across), rather than
-            // adding the assumed 150 back: the dolphin's landing drop measured 94 instead of the native
-            // 70 in the game log, so the exact size of the native shift is not relied on.
-            __instance.mPosX = __state;
+            float magnitude = Math.Abs(__instance.mVelX);
+            float scale = 1f;
+            try
+            {
+                var plant = __instance.FindPlantTarget(ZombieAttackType.Vault);
+                if (plant != null)
+                {
+                    float d = plant.mX - __state.PosX;
+                    float nativeDistance = d + PlantOffset;
+                    if (Math.Abs(nativeDistance) > 20f)
+                    {
+                        scale = (d - PlantOffset) / nativeDistance;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // keep the plain sign flip
+            }
+
+            __instance.mVelX = magnitude * scale;
+        }
+
+        float moved = __instance.mPosX - __state.PosX;
+        if (moved < -DetectDrop)
+        {
+            // The mirror image of the native landing shift.
+            __instance.mPosX = __state.PosX - moved;
             __instance.mX = __instance.mPosX;
         }
     }
