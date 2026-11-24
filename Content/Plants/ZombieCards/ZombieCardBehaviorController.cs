@@ -32,12 +32,15 @@ public class ZombieCardBehaviorController : CustomPlantBehaviorController
         {
             if (PlantDefinition.TryCast<CustomZombieCardDefinition>() is { } card)
             {
-                var leader = ZombieCardUtils.SpawnHypnotizedZombie(Board, card.m_spawnType, Plant.mPlantCol, Plant.mRow, card.m_riseFromGround);
+                // A vehicle (Zomboni, Bobsled Team) only uses the lane of the tile: it starts at the left edge
+                // of that lane, column 0, and drives right over everything in it.
+                int col = card.m_launchFromEdge ? 0 : Plant.mPlantCol;
+                var leader = ZombieCardUtils.SpawnHypnotizedZombie(Board, card.m_spawnType, col, Plant.mRow, card.m_riseFromGround);
 
                 // A horde card (the Flag Zombie): the leader brings a crowd and the huge wave banner.
                 if (leader != null && card.m_escortCount > 0)
                 {
-                    ZombieCardUtils.SpawnEscort(Board, card.m_escortType, card.m_escortCount, Plant.mPlantCol, Plant.mRow);
+                    ZombieCardUtils.SpawnEscort(Board, card.m_escortType, card.m_escortCount, col, Plant.mRow);
                 }
 
                 if (leader != null && card.m_announceHorde)

@@ -28,6 +28,12 @@ public static class ZombieCardCatalog
         // into a swimmer on its own.
         public ZombieType? SpawnType;
 
+        // The zombie whose almanac illustration / ground background the card borrows, when that is not
+        // the catalog key itself. Redeye Gargantuar is the case: the game has no seed packet and no
+        // almanac entry for him (his ZombieDefinition has no preview sprite either), so he shares the
+        // ordinary Gargantuar's packet (PseudoSeed) and almanac art.
+        public ZombieType? ArtFrom;
+
         public bool AlmanacArt;
         public int DefaultSunCost;
 
@@ -40,12 +46,22 @@ public static class ZombieCardCatalog
         // starts in the last water columns, which would only look like a glitch.
         public int MinCol;
         public int MaxCol;
+
+        // A vehicle that drives the whole lane (Zomboni, Bobsled): the card cannot be planted in a
+        // lane that has any pool tile in it, because the vehicle would drive out over the water.
+        public bool AvoidPoolRows;
+
+        // The vehicle does not appear on the tile the card is planted on: only the tile's ROW counts, and
+        // it starts at the left edge of that lane (column 0) and drives right (see
+        // ZombieCardBehaviorController).
+        public bool LaunchFromEdge;
     }
 
     // Mirrors Challenge.IZombieSeedTypeToZombieType (read from the decompile) in reverse. Only
     // zombies that have a native pseudo seed (= native card art) can be listed; more can be added
-    // here with one line each (Bungee, Digger, Balloon, Zamboni and Catapult have art too but their
-    // whole behaviour is a special spawn/attack and make no sense as a conjured walker). The plain
+    // here with one line each (Bungee, Digger, Balloon and Catapult have art too but their whole
+    // behaviour is a special spawn/attack and make no sense as a conjured walker; the Zomboni and the
+    // Bobsled Team are vehicles with patches of their own, see HypnotizedZamboniPatches). The plain
     // walkers - Normal, TrafficCone, Pail, Door, Newspaper, Football, Imp - are what this was
     // written around; the rest (Polevaulter, JackInTheBox, Ladder, Pogo, Dancer, Gargantuar) are
     // listed but untested (as is Flag).
@@ -65,6 +81,24 @@ public static class ZombieCardCatalog
         { ZombieType.Pogo,         new Entry { PseudoSeed = SeedType.ZombiePogo,         DefaultName = "Pogo Zombie" } },
         { ZombieType.Dancer,       new Entry { PseudoSeed = SeedType.ZombieDancer,       DefaultName = "Dancing Zombie" } },
         { ZombieType.Gargantuar,   new Entry { PseudoSeed = SeedType.ZombieGargantuar,   DefaultName = "Gargantuar" } },
+
+        // Red-eyed Gargantuar ("Giga"): the same zombie as the Gargantuar prefab-wise (both definitions
+        // share one prefab). Zombie.ZombieInitialize swaps in the red-eye head image and sets 6000 HP for
+        // type 32 on its own, and HypnotizedGargantuarPatches already treats type 32 like 23. No native
+        // packet or almanac entry exists, so the Gargantuar's are borrowed.
+        { ZombieType.RedeyeGargantuar, new Entry { PseudoSeed = SeedType.ZombieGargantuar, DefaultName = "Giga Gargantuar",
+                                                   ArtFrom = ZombieType.Gargantuar } },
+
+        // Zomboni: the game's own packet (SeedType.Zomboni) supplies the art and the cost. Its native
+        // behaviour is rewritten for a hypnotized one in HypnotizedZamboniPatches (drives right, crushes
+        // the ENEMY zombies it overlaps instead of our plants, lays a harmless ice trail behind it).
+        { ZombieType.Zamboni,      new Entry { PseudoSeed = SeedType.Zomboni, DefaultName = "Zomboni", AvoidPoolRows = true, LaunchFromEdge = true } },
+
+        // Bobsled Team: the leader (the sled) comes with three riders the game itself adds, see
+        // ZombieCardUtils.SpawnHypnotizedBobsled and HypnotizedBobsledPatches. The game has no packet
+        // for it, so the icon is the almanac illustration, like the pool zombies.
+        { ZombieType.Bobsled,      new Entry { PseudoSeed = SeedType.None, DefaultName = "Bobsled Team",
+                                               AlmanacArt = true, DefaultSunCost = 250, Placement = ZombieCardPlacement.Land, AvoidPoolRows = true, LaunchFromEdge = true } },
 
         // Pool zombies. The game has no I, Zombie / Versus packet for any of them, so the icon is the
         // almanac illustration (a 262x262 square stone tile; the seed packet Image keeps the aspect

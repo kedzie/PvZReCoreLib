@@ -68,6 +68,13 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
     // graveyard/Versus spawn path) instead of appearing already standing. Unverified in game.
     public bool m_riseFromGround = false;
 
+    // Vehicles that drive the whole lane (Zomboni, Bobsled Team): refused in any lane that has a pool
+    // tile in it (Board_CanPlantAt_ZombieCardPlacement_Patch).
+    public bool m_avoidPoolRows = false;
+
+    // Vehicles launch from the left edge of the lane of the tile they were planted on (column 0).
+    public bool m_launchFromEdge = false;
+
     // A horde card: besides its own zombie, the card conjures m_escortCount hypnotized zombies of
     // m_escortType behind it (spread over the lanes next to it) and, with m_announceHorde, flashes the
     // "huge wave" banner. Used by the Flag Zombie card ("a flag zombie leads a wave").
@@ -164,6 +171,8 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         m_escortType = escortType;
         m_announceHorde = announceHorde;
 
+        m_avoidPoolRows = entry.AvoidPoolRows;
+        m_launchFromEdge = entry.LaunchFromEdge;
         m_placement = placement ?? entry.Placement;
         m_minCol = entry.MinCol;
         m_maxCol = entry.MaxCol > 0 ? entry.MaxCol : 8;
@@ -215,7 +224,7 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
             ConfigureAlmanacSeedPacketArt(zombieType);
         }
 
-        ConfigureAlmanacArt(zombieType);
+        ConfigureAlmanacArt(entry.ArtFrom ?? zombieType);
     }
 
     // The card icon of a zombie without a native seed packet: the zombie's almanac illustration

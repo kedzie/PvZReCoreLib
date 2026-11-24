@@ -57,6 +57,10 @@
 			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\MelonLoader\net6\MelonLoader.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
+		<Reference Include="Unity.Mathematics">
+			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\MelonLoader\Il2CppAssemblies\Unity.Mathematics.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
 		<Reference Include="Unity.Addressables">
 			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\MelonLoader\Il2CppAssemblies\Unity.Addressables.dll</HintPath>
 			<Private>False</Private>

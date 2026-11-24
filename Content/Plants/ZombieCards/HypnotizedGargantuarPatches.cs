@@ -133,6 +133,13 @@ internal static class HypnotizedGargantuar
             }
 
             other.TakeDamage(SmashDamage, SmashFlags);
+
+            // An enemy Zomboni blows up in his face: the same blast an enemy Gargantuar takes from our
+            // Zomboni (HypnotizedZamboni.GargantuarBlastDamage).
+            if (other.mZombieType == ZombieType.Zamboni && other.IsDeadOrDying())
+            {
+                garg.TakeDamage(HypnotizedZamboni.GargantuarBlastDamage, SmashFlags);
+            }
         }
     }
 

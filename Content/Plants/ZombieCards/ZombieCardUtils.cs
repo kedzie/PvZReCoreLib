@@ -24,6 +24,12 @@ public static class ZombieCardUtils
     // (Board.UpdateZombieSpawning returns early in Versus).
     public static Zombie SpawnHypnotizedZombie(Board board, ZombieType zombieType, int col, int row, bool riseFromGround = false)
     {
+        // The Bobsled Team is four zombies on a sled that the game itself builds around one leader.
+        if (zombieType == ZombieType.Bobsled)
+        {
+            return SpawnHypnotizedBobsled(board, col, row);
+        }
+
         // Board.AddZombieInRow allocates the Zombie, runs ZombieInitialize (which also creates its
         // Unity controller) and registers it in Board.m_zombies. shakeBrush=false is what
         // Challenge.IZombiePlaceZombie passes for a player-placed zombie.
@@ -58,7 +64,14 @@ public static class ZombieCardUtils
             }
         }
 
-        Hypnotize(zombie);
+        // The Zomboni keeps the speed its patch gives it (HypnotizedZamboniPatches); the slow hypnotized
+        // walking speed would make it crawl.
+        bool vehicle = zombie.mZombieType == ZombieType.Zamboni;
+        Hypnotize(zombie, keepNativeSpeed: vehicle);
+        if (vehicle)
+        {
+            zombie.mVelX = HypnotizedZamboni.Speed;
+        }
 
         if (inWater && zombie.mZombieType == ZombieType.DolphinRider && zombie.mZombiePhase == ZombiePhase.DolphinRiding)
         {
@@ -127,6 +140,112 @@ public static class ZombieCardUtils
         Rect rect = zombie.mZombieRect;
         rect.x = x;
         zombie.mZombieRect = rect;
+    }
+
+    // True when any tile of the lane is water (always false on a level without a pool).
+    public static bool RowHasPool(Board board, int row)
+    {
+        try
+        {
+            if (!board.StageHasPool())
+            {
+                return false;
+            }
+
+            for (int col = 0; col < 9; col++)
+            {
+                if (board.IsPoolSquare(col, row))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // an interop hiccup must not turn a land lane into a refused one
+        }
+
+        return false;
+    }
+
+    // Native riders sit 50 px apart behind the leader (Zombie.ZombieInitialize: follower x = leader x +
+    // (index + 1) * 50). The whole sled is mirrored here, so the riders stand behind (left of) the leader.
+    private const float SledRiderSpacing = 50f;
+    private const float SledLength = 3 * SledRiderSpacing + 5f;
+
+    // A hypnotized Bobsled Team. Board.AddZombieInRow(Bobsled) makes the whole team: the sled leader (type
+    // Bobsled, the sled itself is its helm, 300 HP) and three riders (random plain zombies) that it
+    // registers in mFollowerZombieID, all in the "sliding" phase with mVelX = 0.6. The team is moved onto
+    // the tile, mirrored (riders behind the leader, on its left) and every member is hypnotized WITHOUT
+    // the slow hypnotized walking speed: the sliding speed and animations are the native ones. What the
+    // sled does after that is in HypnotizedBobsledPatches. The card passes column 0: the leader is put as far
+    // left as keeps the last rider on the board (SledLength), so the team starts at the left edge.
+    public static Zombie SpawnHypnotizedBobsled(Board board, int col, int row)
+    {
+        Zombie leader = board.AddZombieInRow(ZombieType.Bobsled, row, FromWave, false);
+        if (leader == null)
+        {
+            MelonLogger.Warning("[CoreLib] Board.AddZombieInRow returned null for the Bobsled Team (zombie list full?).");
+            return null;
+        }
+
+        var team = new List<Zombie> { leader };
+        try
+        {
+            foreach (ZombieID id in leader.mFollowerZombieID)
+            {
+                Zombie rider = board.ZombieGet(id);
+                if (rider != null)
+                {
+                    team.Add(rider);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Could not read the Bobsled Team riders: {e.Message}");
+        }
+
+        // The native leader stands off-screen at the right edge with the riders to its right; keep each
+        // member's distance from the leader but mirror it, and keep the last rider on the board.
+        float leaderNativeX = leader.mPosX;
+        float targetX = Math.Max(board.GridToPixelX(col, row) - 30, SledLength);
+        float y = leader.GetPosYBasedOnRow(row);
+
+        foreach (var member in team)
+        {
+            member.mPosX = targetX - (member.mPosX - leaderNativeX);
+            member.mPosY = y;
+        }
+
+        Hypnotize(leader, keepNativeSpeed: true);
+        for (int i = 1; i < team.Count; i++)
+        {
+            HypnotizeRider(team[i]);
+        }
+
+        return leader;
+    }
+
+    // Zombie.StartMindControlled on a Bobsled rider would cut the rider loose from its team: for any
+    // zombie that has a related zombie it clears the related-zombie link on both sides (ISIL, the
+    // Dancer / Backup Dancer chain code), and Zombie.GetBobsledPosition is read from exactly that link,
+    // so a "freed" rider would stop being part of the sled (it would start eating and walk by its own
+    // animation's ground speed on top of the sliding). Setting the flag directly keeps the link; what
+    // StartMindControlled adds on top (the hypnosis sound, the Portal x) is not needed.
+    private static void HypnotizeRider(Zombie rider)
+    {
+        rider.mMindControlled = true;
+        rider.mDroppedLoot = true;
+
+        try
+        {
+            rider.mApp.AddTodParticle(rider.mPosX + 60f, rider.mPosY + 40f, rider.mRenderOrder + 1, ParticleEffect.MindControl);
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Could not spawn the hypnosis particle on a Bobsled rider: {e.Message}");
+        }
     }
 
     // Planting rules for a zombie card that may stand on water (Water / LandOrWater placement).
@@ -204,6 +323,19 @@ public static class ZombieCardUtils
     // Left-to-right wobble inside one rank of the escort, so a rank is not a ruler-straight line.
     private static readonly float[] EscortJitter = { 0f, 14f, -10f, 8f, -16f };
 
+    // Each escort zombie is rolled on its own: this share (percent) are Buckethead, this share Conehead, the
+    // rest the card's own escort type (Normal). Cone and bucket can stand on water like a Normal zombie.
+    private const int EscortBucketheadPercent = 10;
+    private const int EscortConeheadPercent = 20;
+
+    private static ZombieType PickEscortType(ZombieType plain)
+    {
+        int roll = UnityEngine.Random.Range(0, 100);
+        return roll < EscortBucketheadPercent ? ZombieType.Pail
+            : roll < EscortBucketheadPercent + EscortConeheadPercent ? ZombieType.TrafficCone
+            : plain;
+    }
+
     private const float EscortRankSpacing = 52f;
     private const float EscortFirstRank = 46f;
 
@@ -237,7 +369,7 @@ public static class ZombieCardUtils
                 x = slot * 9f;
             }
 
-            Zombie escort = board.AddZombieInRow(zombieType, escortRow, FromWave, false);
+            Zombie escort = board.AddZombieInRow(PickEscortType(zombieType), escortRow, FromWave, false);
             if (escort == null)
             {
                 break;
@@ -277,12 +409,15 @@ public static class ZombieCardUtils
     // edge instead of counting a loss) and plays the hypnosis sound; the native caller then sets
     // mVelX = 0.17 and mAnimTicksPerFrame = 18, spawns the pink-hearts particle (offset +60,+40
     // from the zombie) and calls UpdateAnimSpeed().
-    public static void Hypnotize(Zombie zombie, bool preventLoot = true)
+    public static void Hypnotize(Zombie zombie, bool preventLoot = true, bool keepNativeSpeed = false)
     {
         zombie.StartMindControlled();
 
-        zombie.mVelX = 0.17f;
-        zombie.mAnimTicksPerFrame = 18;
+        if (!keepNativeSpeed)
+        {
+            zombie.mVelX = 0.17f;
+            zombie.mAnimTicksPerFrame = 18;
+        }
 
         // A conjured zombie must not be a coin farm: Zombie.DropLoot and TrySpawnLevelAward both
         // bail out when mDroppedLoot is already set. (The level award is dropped by the last
@@ -292,7 +427,10 @@ public static class ZombieCardUtils
             zombie.mDroppedLoot = true;
         }
 
-        zombie.UpdateAnimSpeed();
+        if (!keepNativeSpeed)
+        {
+            zombie.UpdateAnimSpeed();
+        }
 
         try
         {
