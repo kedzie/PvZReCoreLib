@@ -70,8 +70,9 @@ internal static class HypnotizedIceTrail
         trail.timer = Lifetime;
     }
 
-    // Is x (a lane position) over a live trail of that lane? The Bobsled Team's speed asks this.
-    internal static bool IsOver(Board board, int row, float x)
+    // Does the stretch [left, right] of the lane touch a live trail of that lane? The Bobsled Team asks
+    // this: it stays together only while part of it is over the ice.
+    internal static bool IsOverSpan(Board board, int row, float left, float right)
     {
         if (board == null || row < 0 || row >= MaxRows)
         {
@@ -79,7 +80,7 @@ internal static class HypnotizedIceTrail
         }
 
         var trail = trails[row];
-        return trail != null && trail.timer > 0 && trail.board == board.Pointer && x >= trail.x0 && x <= trail.x1;
+        return trail != null && trail.timer > 0 && trail.board == board.Pointer && right >= trail.x0 && left <= trail.x1;
     }
 
     // The native rule, mirrored: a tile of the lane is blocked when it contains the point 12 px inside

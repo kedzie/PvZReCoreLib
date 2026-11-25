@@ -30,11 +30,12 @@ namespace PvZReCoreLib.Content.Plants.ZombieCards;
 //     after it, with mIceMinX lowered out of the way during it: the sled never melts for lack of ice and
 //     leaves no native (right-anchored) ice patch. The sled lays no trail of its own: only a hypnotized
 //     Zomboni makes ice (HypnotizedIceTrail).
-//  2. Ice only changes its speed. Natively nothing does: mVelX = 0.6 is set once in ZombieInitialize, no
-//     game-mode or ice test touches it (UpdateZombieBobsled, UpdateZombieWalking and ZombieInitialize have
-//     none; ice only keeps the sled alive), so the land speed is our choice. Every tick, while the team
-//     is on the sled, all four members (each moves by its own mVelX) get IceSpeed when the sled's front is
-//     over a hypnotized Zomboni's trail in its lane, LandSpeed otherwise.
+//  2. Ice decides whether the team holds together, as natively (where a sled off the ice melts), but
+//     with our own rule instead of the melt: every tick, while the team is on the sled, it breaks as soon
+//     as no part of it - from the last rider to the leader - is over a hypnotized Zomboni's trail in its
+//     lane. A sled planted in a lane without a trail breaks at once; one launched behind a Zomboni stays
+//     together until it has outrun the trail's end, or the trail fades. The speed is not touched: it is the
+//     native mVelX = 0.6 set once in ZombieInitialize.
 //  3. The first hit breaks it. The sled breaks the moment its body overlaps an enemy zombie - a Gargantuar
 //     is no exception - and the zombie it hit takes no damage. Breaking is the game's own: the leader's
 //     helm is hit for its whole health, so Zombie.DropHelm
@@ -48,13 +49,6 @@ internal static class HypnotizedBobsled
     // Where the sled breaks up: the leader's left edge x. The lawn ends at 760; the riders stand up to
     // 150 px behind the leader and keep sliding for the native 150 tick crash (+90 px) before they walk.
     internal const float SledEndX = 700f;
-
-    // px per tick over a hypnotized Zomboni's ice: the native sliding speed (ZombieInitialize).
-    internal const float IceSpeed = 0.6f;
-
-    // px per tick on bare lawn. The game has no land speed for a sled (see the file header, 2); this is
-    // half the ice speed, and a little faster than a walking zombie (0.23 - 0.38, PickRandomSpeed).
-    internal const float LandSpeed = 0.3f;
 
     // A very low left edge for the native ice melt test (posX + 10 < mIceMinX is false for any posX).
     internal const int NoMeltMinX = -10000;
@@ -97,20 +91,24 @@ internal static class HypnotizedBobsled
         }
     }
 
-    // Every tick: the team's speed follows the ice under the sled's front.
-    internal static void SetSpeed(Zombie sled)
+    // The sled needs ice: it breaks when no part of the team, from the last rider's x to the leader's x,
+    // is over a trail of its lane (see the file header, 2).
+    internal static void BreakOffIce(Zombie sled)
     {
         var board = sled.mBoard;
-        float speed = HypnotizedIceTrail.IsOver(board, sled.mRow, sled.mPosX) ? IceSpeed : LandSpeed;
-
-        sled.mVelX = speed;
+        float left = sled.mPosX;
         foreach (ZombieID id in sled.mFollowerZombieID)
         {
             Zombie rider = board.ZombieGet(id);
             if (rider != null)
             {
-                rider.mVelX = speed;
+                left = Math.Min(left, rider.mPosX);
             }
+        }
+
+        if (!HypnotizedIceTrail.IsOverSpan(board, sled.mRow, left, sled.mPosX))
+        {
+            Break(sled);
         }
     }
 }
@@ -168,8 +166,11 @@ public class Zombie_UpdateZombieBobsled_MindControlled_Patch
             // four updates per tick); the team is driven by its leader (position 0) alone.
             if (HypnotizedBobsled.IsOnTheSled(__instance) && __instance.GetBobsledPosition() == 0)
             {
-                HypnotizedBobsled.SetSpeed(__instance);
-                HypnotizedBobsled.BreakOnFirstHit(__instance);
+                HypnotizedBobsled.BreakOffIce(__instance);
+                if (HypnotizedBobsled.IsOnTheSled(__instance))
+                {
+                    HypnotizedBobsled.BreakOnFirstHit(__instance);
+                }
                 if (HypnotizedBobsled.IsOnTheSled(__instance))
                 {
                     HypnotizedBobsled.BreakAtEnd(__instance);
