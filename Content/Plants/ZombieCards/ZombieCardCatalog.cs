@@ -35,6 +35,12 @@ public static class ZombieCardCatalog
         public ZombieType? ArtFrom;
 
         public bool AlmanacArt;
+
+        // The name of this zombie's slot in the game's Versus seed packet sheet
+        // (CustomZombieCardDefinition.VersusSheetGuid) that VersusPlus fills with its own picture (the game's sheet
+        // has only blank frames there). Used only while CustomZombieCardDefinition.UseVersusSheetArt is on, which
+        // it is not: see there.
+        public string VersusSlot;
         public int DefaultSunCost;
 
         // Where the card may be planted by default (see ZombieCardPlacement). Registrations can
@@ -87,7 +93,8 @@ public static class ZombieCardCatalog
         // type 32 on its own, and HypnotizedGargantuarPatches already treats type 32 like 23. No native
         // packet or almanac entry exists, so the Gargantuar's are borrowed.
         { ZombieType.RedeyeGargantuar, new Entry { PseudoSeed = SeedType.ZombieGargantuar, DefaultName = "Giga Gargantuar",
-                                                   ArtFrom = ZombieType.Gargantuar } },
+                                                   ArtFrom = ZombieType.Gargantuar,
+                                                   VersusSlot = "SPR_SeedPackets_Zombies_Versus_20" } },
 
         // Zomboni: the game's own packet (SeedType.Zomboni) supplies the art and the cost. Its native
         // behaviour is rewritten for a hypnotized one in HypnotizedZamboniPatches (drives right, crushes
@@ -121,6 +128,24 @@ public static class ZombieCardCatalog
         // how the Yeti retreats natively - is simply true for a mind-controlled zombie, so he walks right.
         { ZombieType.Yeti,         new Entry { PseudoSeed = SeedType.None, DefaultName = "Yeti Zombie",
                                                AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.Land } },
+
+        // Zombotany: the plant-headed zombies (ZombieType 26..31, see HypnotizedZombotanyPatches). The game lets every one
+        // of them but the Squash into the pool (Board.ZombieTypeCanGoInPool, with a Ducky Tube), so those may be
+        // planted on water too. No native
+        // packet either, so almanac art; if the game has no almanac entry for one, the card keeps the Basic
+        // Zombie packet art (see CustomZombieCardDefinition.ConfigureAlmanacSeedPacketArt).
+        { ZombieType.PeaHead,      new Entry { PseudoSeed = SeedType.None, DefaultName = "Peashooter Zombie",
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_31", AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.LandOrWater } },
+        { ZombieType.WallnutHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Wall-nut Zombie",
+                                               AlmanacArt = true, DefaultSunCost = 100, Placement = ZombieCardPlacement.LandOrWater } },
+        { ZombieType.TallnutHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Tall-nut Zombie",
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_30", AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.LandOrWater } },
+        { ZombieType.JalapenoHead, new Entry { PseudoSeed = SeedType.None, DefaultName = "Jalapeno Zombie",
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_34", AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.LandOrWater } },
+        { ZombieType.SquashHead,   new Entry { PseudoSeed = SeedType.None, DefaultName = "Squash Zombie",
+                                               AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.Land } },
+        { ZombieType.GatlingHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Gatling Pea Zombie",
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_32", AlmanacArt = true, DefaultSunCost = 250, Placement = ZombieCardPlacement.LandOrWater } },
     };
 
     public static bool TryGet(ZombieType zombieType, out Entry entry)

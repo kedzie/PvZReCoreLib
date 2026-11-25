@@ -224,6 +224,11 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
             ConfigureAlmanacSeedPacketArt(zombieType);
         }
 
+        if (UseVersusSheetArt && !string.IsNullOrEmpty(entry.VersusSlot))
+        {
+            ConfigureVersusSheetArt(source, entry.VersusSlot);
+        }
+
         ConfigureAlmanacArt(entry.ArtFrom ?? zombieType);
     }
 
@@ -258,6 +263,44 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         {
             MelonLogger.Warning($"[CoreLib] Zombie card almanac seed packet art lookup failed for {zombieType}, keeping the Normal zombie packet: {e.Message}");
         }
+    }
+
+    // OFF. The slots named in the catalog (VersusSlot) are blank card frames in the game's own sheet: the pictures
+    // are VersusPlus', which replaces the sheet's pixels with its own PNG (Mods\VersusPlus_Resources) when its
+    // zombie chooser opens. Without that mod, or before that moment, a card using them would show an empty frame,
+    // so the cards use the almanac pictures until there is art of our own to ship.
+    private const bool UseVersusSheetArt = false;
+
+    // The Addressables GUID of the game's Versus seed packet sheet (SPR_SeedPackets_Zombies_Versus), whose
+    // slots are named SPR_SeedPackets_Zombies_Versus_<n>.
+    private const string VersusSheetGuid = "b2e616b9bbbacac4980ba6de852d1a44";
+
+    // The packet (Adventure and Versus) is the zombie's slot in the Versus sheet. If anything goes wrong the
+    // art Configure() already put in place stays.
+    private void ConfigureVersusSheetArt(PlantDefinition source, string slot)
+    {
+        try
+        {
+            var subType = source.m_versusImage?.m_SubObjectType;
+            m_versusImage = MakeVersusSheetSprite(slot, subType);
+            m_plantImage = MakeVersusSheetSprite(slot, subType);
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Zombie card Versus sheet art ({slot}) failed, keeping the other art: {e.Message}");
+        }
+    }
+
+    private static AssetReferenceSprite MakeVersusSheetSprite(string slot, string subObjectType)
+    {
+        var sprite = new AssetReferenceSprite(VersusSheetGuid);
+        sprite.SubObjectName = slot;
+        if (!string.IsNullOrEmpty(subObjectType))
+        {
+            sprite.m_SubObjectType = subObjectType;
+        }
+
+        return PersistentStorage.Store(sprite);
     }
 
     // 30 seconds (game time units are hundredths of a second: Peashooter 750 = 7.5 s, Hypno-shroom
