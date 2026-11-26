@@ -139,6 +139,13 @@ public class Board_CanPlantAt_ZombieCardPlacement_Patch
             return;
         }
 
+        // A zombie is not planted into a flower pot: on a roof level the tile only has to be empty (a pot on the
+        // tile, being a plant, leaves the tile occupied as before).
+        if (__result == PlantingReason.NeedsPot)
+        {
+            __result = __instance.GetTopPlantAt(theGridX, theGridY, PlantPriority.Any) == null ? PlantingReason.Ok : PlantingReason.NotHere;
+        }
+
         // Zomboni / Bobsled Team: they drive the whole lane, so not into a lane with water in it.
         if (card.m_avoidPoolRows && __result == PlantingReason.Ok && ZombieCardUtils.RowHasPool(__instance, theGridY))
         {
