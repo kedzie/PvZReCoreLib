@@ -36,10 +36,9 @@ public static class ZombieCardCatalog
 
         public bool AlmanacArt;
 
-        // The name of this zombie's slot in the game's Versus seed packet sheet
-        // (CustomZombieCardDefinition.VersusSheetGuid) that VersusPlus fills with its own picture (the game's sheet
-        // has only blank frames there). Used only while CustomZombieCardDefinition.UseVersusSheetArt is on, which
-        // it is not: see there.
+        // This zombie's card in VersusPlus' card sheet (a name like SPR_SeedPackets_Zombies_Versus_31: the number
+        // is the card, column n % 7, row n / 7), used for the card's picture when the player has VersusPlus
+        // installed (see CustomZombieCardDefinition.ConfigureVersusPlusArt).
         public string VersusSlot;
         public int DefaultSunCost;
 
@@ -137,13 +136,13 @@ public static class ZombieCardCatalog
         { ZombieType.PeaHead,      new Entry { PseudoSeed = SeedType.None, DefaultName = "Peashooter Zombie",
                                                VersusSlot = "SPR_SeedPackets_Zombies_Versus_31", AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.LandOrWater } },
         { ZombieType.WallnutHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Wall-nut Zombie",
-                                               AlmanacArt = true, DefaultSunCost = 100, Placement = ZombieCardPlacement.LandOrWater } },
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_30", AlmanacArt = true, DefaultSunCost = 100, Placement = ZombieCardPlacement.LandOrWater } },
         { ZombieType.TallnutHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Tall-nut Zombie",
                                                VersusSlot = "SPR_SeedPackets_Zombies_Versus_30", AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.LandOrWater } },
         { ZombieType.JalapenoHead, new Entry { PseudoSeed = SeedType.None, DefaultName = "Jalapeno Zombie",
                                                VersusSlot = "SPR_SeedPackets_Zombies_Versus_34", AlmanacArt = true, DefaultSunCost = 150, Placement = ZombieCardPlacement.LandOrWater } },
         { ZombieType.SquashHead,   new Entry { PseudoSeed = SeedType.None, DefaultName = "Squash Zombie",
-                                               AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.Land } },
+                                               VersusSlot = "SPR_SeedPackets_Zombies_Versus_33", AlmanacArt = true, DefaultSunCost = 125, Placement = ZombieCardPlacement.Land } },
         { ZombieType.GatlingHead,  new Entry { PseudoSeed = SeedType.None, DefaultName = "Gatling Pea Zombie",
                                                VersusSlot = "SPR_SeedPackets_Zombies_Versus_32", AlmanacArt = true, DefaultSunCost = 250, Placement = ZombieCardPlacement.LandOrWater } },
     };

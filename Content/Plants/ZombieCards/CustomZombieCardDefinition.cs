@@ -224,9 +224,9 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
             ConfigureAlmanacSeedPacketArt(zombieType);
         }
 
-        if (UseVersusSheetArt && !string.IsNullOrEmpty(entry.VersusSlot))
+        if (!string.IsNullOrEmpty(entry.VersusSlot))
         {
-            ConfigureVersusSheetArt(source, entry.VersusSlot);
+            ConfigureVersusPlusArt(entry.VersusSlot);
         }
 
         ConfigureAlmanacArt(entry.ArtFrom ?? zombieType);
@@ -265,42 +265,88 @@ public class CustomZombieCardDefinition : CustomPlantDefinition
         }
     }
 
-    // OFF. The slots named in the catalog (VersusSlot) are blank card frames in the game's own sheet: the pictures
-    // are VersusPlus', which replaces the sheet's pixels with its own PNG (Mods\VersusPlus_Resources) when its
-    // zombie chooser opens. Without that mod, or before that moment, a card using them would show an empty frame,
-    // so the cards use the almanac pictures until there is art of our own to ship.
-    private const bool UseVersusSheetArt = false;
+    // The cards for the zombies the game has no packet for take their picture from VersusPlus' card sheet
+    // (Mods\VersusPlus_Resources\new.png, 2048x2048, 7 columns x 5 rows of 188x258 cards, in the same order as the
+    // slot numbers of the game's own Versus sheet - SPR_SeedPackets_Zombies_Versus_<n> is column n % 7, row n / 7).
+    // The game's own sheet has only blank frames in those slots: VersusPlus swaps its own pixels in, but only once its
+    // zombie chooser has opened, so pointing at the game's slots showed empty frames on a belt or in the Adventure
+    // seed bank. So the PNG is read here, once, from the player's own VersusPlus install (nothing of it is shipped
+    // with CoreLib) and the card's sprite is cut out of it. Without VersusPlus (or if the file cannot be read) the
+    // card simply keeps the art it has without this (see Configure).
+    private static Texture2D _versusPlusSheet;
+    private static bool _versusPlusSheetTried;
+    private static readonly int[] VersusPlusColumnLeft = { 0, 197, 393, 590, 786, 983, 1179 };
+    private static readonly int[] VersusPlusRowTop = { 0, 263, 526, 789, 1052 };
+    private const int VersusPlusCardWidth = 188;
+    private const int VersusPlusCardHeight = 258;
 
-    // The Addressables GUID of the game's Versus seed packet sheet (SPR_SeedPackets_Zombies_Versus), whose
-    // slots are named SPR_SeedPackets_Zombies_Versus_<n>.
-    private const string VersusSheetGuid = "b2e616b9bbbacac4980ba6de852d1a44";
-
-    // The packet (Adventure and Versus) is the zombie's slot in the Versus sheet. If anything goes wrong the
-    // art Configure() already put in place stays.
-    private void ConfigureVersusSheetArt(PlantDefinition source, string slot)
+    private static Texture2D LoadVersusPlusSheet()
     {
+        if (_versusPlusSheetTried)
+        {
+            return _versusPlusSheet;
+        }
+
+        _versusPlusSheetTried = true;
         try
         {
-            var subType = source.m_versusImage?.m_SubObjectType;
-            m_versusImage = MakeVersusSheetSprite(slot, subType);
-            m_plantImage = MakeVersusSheetSprite(slot, subType);
+            string path = System.IO.Path.Combine(MelonLoader.Utils.MelonEnvironment.ModsDirectory, "VersusPlus_Resources", "new.png");
+            if (!System.IO.File.Exists(path))
+            {
+                return null;
+            }
+
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!ImageConversion.LoadImage(texture, System.IO.File.ReadAllBytes(path)))
+            {
+                MelonLogger.Warning("[CoreLib] VersusPlus' card sheet (new.png) could not be read - the zombie cards keep their own art.");
+                return null;
+            }
+
+            PersistentStorage.Store(texture);
+            _versusPlusSheet = texture;
         }
         catch (Exception e)
         {
-            MelonLogger.Warning($"[CoreLib] Zombie card Versus sheet art ({slot}) failed, keeping the other art: {e.Message}");
+            MelonLogger.Warning($"[CoreLib] VersusPlus' card sheet could not be loaded - the zombie cards keep their own art: {e.Message}");
         }
+
+        return _versusPlusSheet;
     }
 
-    private static AssetReferenceSprite MakeVersusSheetSprite(string slot, string subObjectType)
+    // slot is a name like "SPR_SeedPackets_Zombies_Versus_31"; the number after the last underscore picks the card.
+    private void ConfigureVersusPlusArt(string slot)
     {
-        var sprite = new AssetReferenceSprite(VersusSheetGuid);
-        sprite.SubObjectName = slot;
-        if (!string.IsNullOrEmpty(subObjectType))
+        try
         {
-            sprite.m_SubObjectType = subObjectType;
-        }
+            var sheet = LoadVersusPlusSheet();
+            if (sheet == null || !int.TryParse(slot.Substring(slot.LastIndexOf('_') + 1), out int index))
+            {
+                return;
+            }
 
-        return PersistentStorage.Store(sprite);
+            int column = index % VersusPlusColumnLeft.Length;
+            int row = index / VersusPlusColumnLeft.Length;
+            if (row >= VersusPlusRowTop.Length)
+            {
+                return;
+            }
+
+            // Unity's texture origin is the bottom-left corner, the PNG's row tops are measured from the top.
+            var rect = new Rect(VersusPlusColumnLeft[column], sheet.height - VersusPlusRowTop[row] - VersusPlusCardHeight,
+                VersusPlusCardWidth, VersusPlusCardHeight);
+            var sprite = Sprite.Create(sheet, rect, new Vector2(0.5f, 0.5f), 1f);
+            PersistentStorage.Store(sprite);
+
+            m_plantImage = PersistentStorage.Store(new AssetReferenceSprite(Guid.NewGuid().ToString()));
+            RegistryBridge.RegisterObject(sprite, m_plantImage.m_AssetGUID);
+            m_versusImage = PersistentStorage.Store(new AssetReferenceSprite(Guid.NewGuid().ToString()));
+            RegistryBridge.RegisterObject(sprite, m_versusImage.m_AssetGUID);
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Zombie card art from VersusPlus ({slot}) failed, keeping the other art: {e.Message}");
+        }
     }
 
     // 30 seconds (game time units are hundredths of a second: Peashooter 750 = 7.5 s, Hypno-shroom

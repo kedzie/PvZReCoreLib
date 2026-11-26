@@ -8,6 +8,10 @@
     </PropertyGroup>
 
 	<ItemGroup>
+		<Reference Include="UnityEngine.ImageConversionModule">
+			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\MelonLoader\Il2CppAssemblies\UnityEngine.ImageConversionModule.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
 		<!-- Optional runtime dependency (the mod menu) - compile-time only, never shipped. -->
 		<Reference Include="BloomEngine">
 			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\Mods\BloomEngine.dll</HintPath>
