@@ -8,6 +8,8 @@ using PvZReCoreLib.Util;
 
 [assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.15", "Draco9990 & Kedzie")]
 [assembly: MelonGame("PopCap Games", "PvZ Replanted")]
+// BloomEngine (the mod menu) is optional: MelonLoader loads it first when it is installed and the mod still loads without it.
+[assembly: MelonOptionalDependencies("BloomEngine")]
 
 namespace PvZReCoreLib;
 
@@ -44,6 +46,13 @@ public class CoreLibMod : MelonMod
     // poll racing against whether OnGUI happens to fire at all. (This also surfaced a second,
     // separate bug - RegistryBridge.LoadAssetFromAssetBundle crashing under 0.7.3's Il2CppInterop
     // - already fixed there; the two are unrelated except that this hook is what exposed it.)
+    public override void OnInitializeMelon()
+    {
+        base.OnInitializeMelon();
+
+        PvZReCoreLib.Content.Plants.Patches.ConveyorSettings.Init(this);
+    }
+
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
     {
         base.OnSceneWasLoaded(buildIndex, sceneName);

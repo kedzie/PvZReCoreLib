@@ -32,6 +32,12 @@ public class CustomPlantDefinition : PlantDefinition
     // Board_CanPlantAt_RequiresGround_Patch in PlantPatches.cs).
     public bool m_requiresGround = false;
 
+    // A plant that makes no sense on a roof level: one that has to burrow into real ground, or that shoots or
+    // rolls straight along the lane, where the roof's slope stops it (lobbers are fine). Conveyor belts do not
+    // drop it while the level has a roof (the Dr. Zomboss fight, for one). A plant with m_requiresGround is
+    // treated the same way. It does not stop the plant being planted by hand.
+    public bool m_notOnRoof = false;
+
     // Stackable plant (PvZ2 "CanPlantAgainToUpgrade", e.g. Peapod): how many times this plant may
     // be planted on the SAME tile, each planting merging into the existing plant instead of
     // being a second plant. 1 = not stackable (default). See PlantStacking.cs for the mechanism;

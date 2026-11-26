@@ -8,6 +8,11 @@
     </PropertyGroup>
 
 	<ItemGroup>
+		<!-- Optional runtime dependency (the mod menu) - compile-time only, never shipped. -->
+		<Reference Include="BloomEngine">
+			<HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\Mods\BloomEngine.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
 		<Reference Include="0Harmony">
 		  <HintPath>C:\SteamLibrary\steamapps\common\PVZ Replanted\MelonLoader\net6\0Harmony.dll</HintPath>
 		</Reference>
