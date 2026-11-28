@@ -6,7 +6,7 @@ using PvZReCoreLib.Content.Common.Skins;
 using PvZReCoreLib.Content.Plants.Patches;
 using PvZReCoreLib.Util;
 
-[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.16", "Draco9990 & Kedzie")]
+[assembly: MelonInfo(typeof(CoreLibMod), "CoreLib", "1.17", "Draco9990 & Kedzie")]
 [assembly: MelonGame("PopCap Games", "PvZ Replanted")]
 // BloomEngine (the mod menu) is optional: MelonLoader loads it first when it is installed and the mod still loads without it.
 [assembly: MelonOptionalDependencies("BloomEngine")]
