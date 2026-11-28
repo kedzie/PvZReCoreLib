@@ -22,6 +22,40 @@ public class UnityUtil
 
     #region Methods
 
+    // Plays a named Animator state on the first Animator found under 'obj' (an effect prefab whose controller holds
+    // several clips, the default state being the first). Returns false when there is no Animator. Lives here so mods
+    // that must keep their csproj free of the animation module reference can still pick a clip.
+    // Length in seconds of the clip called 'clipName' in the first Animator under 'obj' (the fallback when it is not found).
+    public static float GetAnimatorClipLength(GameObject obj, string clipName, float fallbackSeconds)
+    {
+        var animator = obj == null ? null : obj.GetComponentInChildren<Animator>(true);
+        var controller = animator?.runtimeAnimatorController;
+        if (controller != null)
+        {
+            foreach (var clip in controller.animationClips)
+            {
+                if (clip != null && clip.name == clipName)
+                {
+                    return clip.length;
+                }
+            }
+        }
+
+        return fallbackSeconds;
+    }
+
+    public static bool PlayAnimatorState(GameObject obj, string stateName)
+    {
+        var animator = obj == null ? null : obj.GetComponentInChildren<Animator>(true);
+        if (animator == null)
+        {
+            return false;
+        }
+
+        animator.Play(stateName);
+        return true;
+    }
+
     public static void LogDetails(GameObject obj, int indentLevel = 0)
     {
         string indent = new string(' ', indentLevel * 2);

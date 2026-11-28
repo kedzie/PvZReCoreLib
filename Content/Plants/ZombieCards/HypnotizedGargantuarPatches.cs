@@ -118,7 +118,7 @@ internal static class HypnotizedGargantuar
             return;
         }
 
-        foreach (var entry in board.m_zombies.m_list.ToList())
+        foreach (var entry in ZombieSnapshot.Items(board))
         {
             var other = entry.mItem;
             if (other == null
@@ -149,7 +149,7 @@ internal static class HypnotizedGargantuar
     {
         float expectedX = simulatedX - ImpOffset;
 
-        foreach (var entry in garg.mBoard.m_zombies.m_list.ToList())
+        foreach (var entry in ZombieSnapshot.Items(garg.mBoard))
         {
             var z = entry.mItem;
             if (z != null
