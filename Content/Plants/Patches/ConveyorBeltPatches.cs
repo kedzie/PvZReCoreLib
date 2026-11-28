@@ -27,19 +27,25 @@ internal static class ConveyorSettings
 {
     private const int ChanceDefault = 35;
     private const int ShareDefault = 30;
+    private const int SpeedDefault = 1;
 
     private static MelonPreferences_Entry<int> _customChance;
     private static MelonPreferences_Entry<int> _zombieShare;
+    private static MelonPreferences_Entry<int> _beltSpeed;
     private static MelonPreferences_Entry<bool> _roofRules;
     private static MelonPreferences_Category _category;
     private static Func<int> _bloomChance;
     private static Func<int> _bloomShare;
+    private static Func<int> _bloomSpeed;
 
     // Percent of the belt's drops that are replaced by a custom plant or zombie card.
     internal static int CustomChancePercent => Clamp(_customChance?.Value ?? ChanceDefault);
 
     // Percent of those custom drops that are zombie cards (the rest are plants).
     internal static int ZombieSharePercent => Clamp(_zombieShare?.Value ?? ShareDefault);
+
+    // How many times faster the belt drops packets (1 = the game's own pace).
+    internal static int BeltSpeed => Math.Max(1, Math.Min(10, _beltSpeed?.Value ?? SpeedDefault));
 
     // On a roof level, leave out the plants that cannot work there.
     internal static bool RoofRules => _roofRules?.Value ?? true;
@@ -55,6 +61,7 @@ internal static class ConveyorSettings
 
             _customChance = _category.CreateEntry("CustomDropChance", ChanceDefault, "Conveyor belt: percent (0-100) of the drops replaced by a custom plant or zombie card. 0 = never.");
             _zombieShare = _category.CreateEntry("ZombieShare", ShareDefault, "Conveyor belt: percent (0-100) of those custom drops that are hypnotized zombie cards, the rest are plants.");
+            _beltSpeed = _category.CreateEntry("BeltSpeed", SpeedDefault, "Conveyor belt: how many times faster packets drop (1-10). 1 = the game's own pace.");
             _roofRules = _category.CreateEntry("RoofRules", true, "Conveyor belt: on a roof level, do not drop plants that cannot work there (straight shooters, ground plants).");
 
             _category.SaveToFile(false);
@@ -73,12 +80,13 @@ internal static class ConveyorSettings
 
         try
         {
-            (_bloomChance, _bloomShare) = ConveyorBloomEngine.Register(mod, _customChance?.Value ?? ChanceDefault, _zombieShare?.Value ?? ShareDefault,
-                value => WriteBack(_customChance, value), value => WriteBack(_zombieShare, value));
+            (_bloomChance, _bloomShare, _bloomSpeed) = ConveyorBloomEngine.Register(mod, _customChance?.Value ?? ChanceDefault, _zombieShare?.Value ?? ShareDefault, _beltSpeed?.Value ?? SpeedDefault,
+                value => WriteBack(_customChance, value), value => WriteBack(_zombieShare, value), value => WriteBack(_beltSpeed, value));
 
             // Bring the file in line with what the menu holds from the start (BloomEngine keeps its own saved value).
             WriteBack(_customChance, _bloomChance());
             WriteBack(_zombieShare, _bloomShare());
+            WriteBack(_beltSpeed, _bloomSpeed());
             MelonLogger.Msg("[CoreLib] BloomEngine found - the conveyor belt settings are in its mod menu.");
         }
         catch (Exception e)
@@ -86,6 +94,7 @@ internal static class ConveyorSettings
             MelonLogger.Warning($"[CoreLib] BloomEngine is installed but the conveyor belt menu could not be set up ({e.GetType().Name}: {e.Message}) - using ConveyorBelt.cfg instead.");
             _bloomChance = null;
             _bloomShare = null;
+            _bloomSpeed = null;
         }
     }
 
@@ -131,6 +140,30 @@ internal static class ConveyorBeltCustomPlants
         catch (Exception)
         {
             // keep the plants rather than lose the belt
+        }
+    }
+
+    // Faster belt: take extra ticks off the drop countdown (Challenge.mConveyorBeltCounter), so the game's own
+    // interval - including its slow-down as the belt fills - is divided by the speed. The game still decides
+    // what drops. Nothing is taken off while the belt is full (a drop then has nowhere to go).
+    internal static void SpeedUp(Challenge challenge)
+    {
+        int speed = ConveyorSettings.BeltSpeed;
+        if (speed <= 1 || challenge.mBoard == null || !challenge.mBoard.HasConveyorBeltSeedBank())
+        {
+            return;
+        }
+
+        var bank = challenge.mBoard.mSeedBank;
+        if (bank == null || bank.GetNumSeedsOnConveyorBelt() >= bank.mNumPackets)
+        {
+            return;
+        }
+
+        int counter = challenge.mConveyorBeltCounter;
+        if (counter > 1)
+        {
+            challenge.mConveyorBeltCounter = Math.Max(1, counter - (speed - 1));
         }
     }
 
@@ -218,6 +251,15 @@ public class Challenge_UpdateConveyorBelt_CustomPlants_Patch
 {
     public static void Prefix(Challenge __instance)
     {
+        try
+        {
+            ConveyorBeltCustomPlants.SpeedUp(__instance);
+        }
+        catch (Exception e)
+        {
+            MelonLogger.Warning($"[CoreLib] Conveyor belt speed-up failed: {e.Message}");
+        }
+
         ConveyorBeltCustomPlants.Begin(__instance);
     }
 
