@@ -45,6 +45,16 @@ public class CustomPlantDefinition : PlantDefinition
     // told about each merge through OnStackedOn.
     public int m_maxStack = 1;
 
+    // Wall-nut first aid for a custom nut: planting the same plant on a damaged one of its own kind (health
+    // below two thirds, the point where a nut shows cracks) heals it to full instead of being refused, and the
+    // seed is spent. Native Wall-nut / Tall-nut do the same. See PlantRepair.cs.
+    public bool m_healsOnReplant = false;
+
+    // A plant that goes ON TOP of another plant (PvZ2 "armor" layer, e.g. Pea Vine): it may be planted on a tile
+    // that already holds any other plant, and stays a separate plant of its own there (zombies chew through
+    // whichever they reach first). Only one such plant per tile. See PlantRepair.cs.
+    public bool m_plantsOnTopOfPlant = false;
+
     // A nut (Wall-nut, Tall-nut and the like): zombies that need a nut to act on - the Ladder
     // Zombie places its ladder on one - treat this plant as a Wall-nut for that. The game keys
     // that on the literal seed types Wallnut/Tallnut/Pumpkinshell, so a custom nut would otherwise

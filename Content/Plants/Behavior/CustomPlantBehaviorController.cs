@@ -380,6 +380,12 @@ public class Plant_PlantUpdate_Patch
                 {
                     return false;
                 }
+
+                // A nut planted on a damaged twin heals it and is spent (CustomPlantDefinition.m_healsOnReplant).
+                if (PlantRepair.TryHealExisting(customPlantBehavior))
+                {
+                    return false;
+                }
             }
 
             return customPlantBehavior.PrePlantUpdate();
