@@ -13,27 +13,27 @@ namespace PvZReCoreLib.Content.Plants.Patches;
 internal static class ConveyorBloomEngine
 {
     [MethodImpl(MethodImplOptions.NoInlining)]
-    internal static (Func<int> chance, Func<int> zombieShare, Func<int> speed) Register(MelonMod mod, int chanceDefault, int shareDefault, int speedDefault,
-        Action<int> chanceApplied, Action<int> shareApplied, Action<int> speedApplied)
+    internal static (Func<int> chance, Func<int> zombieShare, Func<int> speed) Register(MelonMod mod, int plantDefault, int zombieDefault, int speedDefault,
+        Action<int> plantApplied, Action<int> zombieApplied, Action<int> speedApplied)
     {
-        var chance = ConfigService.CreateFloat("Custom drop chance (%)",
-            "Conveyor belt: the percent of drops that are replaced by a custom plant or zombie card. 0 = never, 100 = every drop.",
-            chanceDefault, 0f, 100f);
-        var share = ConfigService.CreateFloat("Zombie share (%)",
-            "Conveyor belt: of those custom drops, the percent that are hypnotized zombie cards. The rest are custom plants.",
-            shareDefault, 0f, 100f);
+        var chance = ConfigService.CreateFloat("Custom plants (%)",
+            "Conveyor belt: the percent of drops that are a custom plant (the PvZ2 plants of Complete Collection 2 and other mods'). 0 = never.",
+            plantDefault, 0f, 100f);
+        var share = ConfigService.CreateFloat("Zombie cards (%)",
+            "Conveyor belt: the percent of drops that are a hypnotized zombie card. 0 = never. What is left of the 100% after these two is the level's own plants.",
+            zombieDefault, 0f, 100f);
 
         var speed = ConfigService.CreateFloat("Belt speed (x)",
             "Conveyor belt: how many times faster packets drop. 1 = the game's own pace.",
-            speedDefault, 1f, 10f);
+            speedDefault, 1f, 100f);
 
-        chance.WithOnValueApplied(value => chanceApplied((int)Math.Round(value)));
-        share.WithOnValueApplied(value => shareApplied((int)Math.Round(value)));
+        chance.WithOnValueApplied(value => plantApplied((int)Math.Round(value)));
+        share.WithOnValueApplied(value => zombieApplied((int)Math.Round(value)));
         speed.WithOnValueApplied(value => speedApplied((int)Math.Round(value)));
 
         ModMenuService.CreateEntry(mod)
             .AddDisplayName("CoreLib conveyor belt")
-            .AddDescription("How often conveyor belts (including the Dr. Zomboss fight) drop custom plants and hypnotized zombie cards, and how fast they drop.")
+            .AddDescription("What conveyor belts (including the Dr. Zomboss fight) drop - custom plants, hypnotized zombie cards or the level's own plants - and how fast.")
             .AddConfigInputs(new BaseConfigInput[] { chance, share, speed })
             .Register();
 

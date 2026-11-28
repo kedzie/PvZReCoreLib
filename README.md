@@ -22,7 +22,7 @@ CoreLib is the shared foundation of the [Complete Collection 2](https://github.c
 | **Asset bundles and skins** | `RegistryBridge.RegisterAssetBundle` plus sprite-renderer plant and projectile skins loaded from Unity asset bundles; seed packet and preview art from the bundle. |
 | **Stackable plants** | `m_maxStack` lets a plant be planted on itself to grow (Peapod). |
 | **Zombie cards** | Hypnotized zombie seed packets with a catalog of the game's zombies, including vehicles, Zombotany and Dr. Zomboss interaction. |
-| **Conveyor belts** | Custom plants and zombie cards drop on belt levels, and the belt can run up to 10x faster. Settings live in `Mods/CoreLib/ConveyorBelt.cfg`; BloomEngine is an optional menu. |
+| **Conveyor belts** | Custom plants and zombie cards drop on belt levels, and the belt can run up to 100x faster. Settings live in `Mods/CoreLib/ConveyorBelt.cfg`; BloomEngine is an optional menu. |
 | **Mint families** | The family system (Enlighten-Mint and friends) for plants that boost each other. |
 | **Roof and nut rules** | `m_notOnRoof`, `m_requiresGround`, `m_countsAsNut` so custom plants fit the game's special cases. |
 

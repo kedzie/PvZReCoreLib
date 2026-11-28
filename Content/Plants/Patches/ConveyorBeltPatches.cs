@@ -25,27 +25,28 @@ namespace PvZReCoreLib.Content.Plants.Patches;
 // start-up and again on every change in the menu.
 internal static class ConveyorSettings
 {
-    private const int ChanceDefault = 35;
-    private const int ShareDefault = 30;
+    private const int PlantDefault = 25;
+    private const int ZombieDefault = 10;
     private const int SpeedDefault = 1;
 
-    private static MelonPreferences_Entry<int> _customChance;
-    private static MelonPreferences_Entry<int> _zombieShare;
+    private static MelonPreferences_Entry<int> _plantChance;
+    private static MelonPreferences_Entry<int> _zombieChance;
     private static MelonPreferences_Entry<int> _beltSpeed;
     private static MelonPreferences_Entry<bool> _roofRules;
     private static MelonPreferences_Category _category;
-    private static Func<int> _bloomChance;
-    private static Func<int> _bloomShare;
+    private static Func<int> _bloomPlants;
+    private static Func<int> _bloomZombies;
     private static Func<int> _bloomSpeed;
 
-    // Percent of the belt's drops that are replaced by a custom plant or zombie card.
-    internal static int CustomChancePercent => Clamp(_customChance?.Value ?? ChanceDefault);
+    // Percent of the belt's drops that are replaced by a custom plant.
+    internal static int CustomPlantPercent => Clamp(_plantChance?.Value ?? PlantDefault);
 
-    // Percent of those custom drops that are zombie cards (the rest are plants).
-    internal static int ZombieSharePercent => Clamp(_zombieShare?.Value ?? ShareDefault);
+    // Percent of the belt's drops that are replaced by a hypnotized zombie card. Whatever is left of the 100%
+    // (after the custom plants) is the level's own drops.
+    internal static int ZombieCardPercent => Clamp(_zombieChance?.Value ?? ZombieDefault);
 
     // How many times faster the belt drops packets (1 = the game's own pace).
-    internal static int BeltSpeed => Math.Max(1, Math.Min(10, _beltSpeed?.Value ?? SpeedDefault));
+    internal static int BeltSpeed => Math.Max(1, Math.Min(100, _beltSpeed?.Value ?? SpeedDefault));
 
     // On a roof level, leave out the plants that cannot work there.
     internal static bool RoofRules => _roofRules?.Value ?? true;
@@ -59,9 +60,9 @@ internal static class ConveyorSettings
             _category = MelonPreferences.CreateCategory("CoreLib_ConveyorBelt", "CoreLib conveyor belt");
             _category.SetFilePath(Path.Combine(MelonEnvironment.ModsDirectory, "CoreLib", "ConveyorBelt.cfg"));
 
-            _customChance = _category.CreateEntry("CustomDropChance", ChanceDefault, "Conveyor belt: percent (0-100) of the drops replaced by a custom plant or zombie card. 0 = never.");
-            _zombieShare = _category.CreateEntry("ZombieShare", ShareDefault, "Conveyor belt: percent (0-100) of those custom drops that are hypnotized zombie cards, the rest are plants.");
-            _beltSpeed = _category.CreateEntry("BeltSpeed", SpeedDefault, "Conveyor belt: how many times faster packets drop (1-10). 1 = the game's own pace.");
+            _plantChance = _category.CreateEntry("CustomPlantChance", PlantDefault, "Conveyor belt: percent (0-100) of the drops that are a custom plant (the Complete Collection's PvZ2 plants and any other mod's). 0 = never.");
+            _zombieChance = _category.CreateEntry("ZombieCardChance", ZombieDefault, "Conveyor belt: percent (0-100) of the drops that are a hypnotized zombie card. 0 = never. What is left of the 100% after the custom plants and zombie cards is the level's own plants.");
+            _beltSpeed = _category.CreateEntry("BeltSpeed", SpeedDefault, "Conveyor belt: how many times faster packets drop (1-100). 1 = the game's own pace. Around 100 a packet drops every tick the belt has room.");
             _roofRules = _category.CreateEntry("RoofRules", true, "Conveyor belt: on a roof level, do not drop plants that cannot work there (straight shooters, ground plants).");
 
             _category.SaveToFile(false);
@@ -80,20 +81,20 @@ internal static class ConveyorSettings
 
         try
         {
-            (_bloomChance, _bloomShare, _bloomSpeed) = ConveyorBloomEngine.Register(mod, _customChance?.Value ?? ChanceDefault, _zombieShare?.Value ?? ShareDefault, _beltSpeed?.Value ?? SpeedDefault,
-                value => WriteBack(_customChance, value), value => WriteBack(_zombieShare, value), value => WriteBack(_beltSpeed, value));
+            (_bloomPlants, _bloomZombies, _bloomSpeed) = ConveyorBloomEngine.Register(mod, _plantChance?.Value ?? PlantDefault, _zombieChance?.Value ?? ZombieDefault, _beltSpeed?.Value ?? SpeedDefault,
+                value => WriteBack(_plantChance, value), value => WriteBack(_zombieChance, value), value => WriteBack(_beltSpeed, value));
 
             // Bring the file in line with what the menu holds from the start (BloomEngine keeps its own saved value).
-            WriteBack(_customChance, _bloomChance());
-            WriteBack(_zombieShare, _bloomShare());
+            WriteBack(_plantChance, _bloomPlants());
+            WriteBack(_zombieChance, _bloomZombies());
             WriteBack(_beltSpeed, _bloomSpeed());
             MelonLogger.Msg("[CoreLib] BloomEngine found - the conveyor belt settings are in its mod menu.");
         }
         catch (Exception e)
         {
             MelonLogger.Warning($"[CoreLib] BloomEngine is installed but the conveyor belt menu could not be set up ({e.GetType().Name}: {e.Message}) - using ConveyorBelt.cfg instead.");
-            _bloomChance = null;
-            _bloomShare = null;
+            _bloomPlants = null;
+            _bloomZombies = null;
             _bloomSpeed = null;
         }
     }
@@ -217,7 +218,11 @@ internal static class ConveyorBeltCustomPlants
             return;
         }
 
-        if (UnityEngine.Random.Range(0, 100) >= ConveyorSettings.CustomChancePercent)
+        // One roll over 100: the first slice is custom plants, the next one zombie cards, the rest is the
+        // level's own drop (nothing is swapped).
+        int roll = UnityEngine.Random.Range(0, 100);
+        int plantPercent = ConveyorSettings.CustomPlantPercent;
+        if (roll >= plantPercent + ConveyorSettings.ZombieCardPercent)
         {
             return;
         }
@@ -226,8 +231,8 @@ internal static class ConveyorBeltCustomPlants
         var zombies = new List<SeedType>();
         Candidates(plants, zombies);
 
-        // Zombie cards or plants first, by the share; if that group is empty on this level, the other one.
-        bool wantZombie = UnityEngine.Random.Range(0, 100) < ConveyorSettings.ZombieSharePercent;
+        // The rolled kind; if that group is empty on this level, the other one.
+        bool wantZombie = roll >= plantPercent;
         var group = wantZombie ? zombies : plants;
         if (group.Count == 0)
         {
